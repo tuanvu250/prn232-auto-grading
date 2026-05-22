@@ -1,0 +1,15 @@
+.next
+out
+build
+dist
+node_modules
+*.lock
+package-lock.json
+.env*
+!.env.example
+plans
+.cursor
+docs
+AGENTS.md
+CLAUDE.md
+README.md
