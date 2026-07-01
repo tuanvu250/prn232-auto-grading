@@ -42,7 +42,7 @@ export function LabList({ labs, selectedLab, loadingGrades, onSelectLab }: LabLi
       <div className="flex flex-col items-center justify-center p-12 border border-dashed rounded-lg bg-card text-muted-foreground text-center gap-2">
         <p className="text-sm font-medium">No graded submissions yet</p>
         <p className="text-xs text-muted-foreground">
-          Submit your work through the grading system and results will appear here.
+          No lab has been detected for your class yet.
         </p>
       </div>
     );
