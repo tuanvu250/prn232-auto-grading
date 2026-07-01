@@ -4,7 +4,8 @@ import { getServerUser, userIsAdmin } from "@/lib/server/auth";
 import { supabaseServer } from "@/lib/server/supabase";
 
 interface UpdateRequest {
-  status?: "pending" | "completed";
+  status?: "approved" | "rejected" | "completed";
+  adminNote?: string;
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -17,20 +18,34 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const { id } = await context.params;
     const body = (await request.json()) as UpdateRequest;
 
-    if (body.status !== "completed") {
-      return NextResponse.json({ success: false, error: "Only completed status is supported" }, { status: 400 });
+    if (body.status !== "approved" && body.status !== "rejected" && body.status !== "completed") {
+      return NextResponse.json(
+        { success: false, error: "Only approved, rejected or completed status is supported" },
+        { status: 400 }
+      );
     }
+
+    const adminNote = body.adminNote?.trim() || null;
+    if (body.status === "rejected" && !adminNote) {
+      return NextResponse.json(
+        { success: false, error: "Reject note is required" },
+        { status: 400 }
+      );
+    }
+
+    const fromStatus = body.status === "completed" ? "approved" : "pending";
 
     const { data, error } = await supabaseServer
       .from("resubmission_requests")
       .update({
-        status: "completed",
+        status: body.status,
+        admin_note: adminNote,
         completed_at: new Date().toISOString(),
         completed_by: user.email,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
-      .eq("status", "pending")
+      .eq("status", fromStatus)
       .select("*")
       .single();
 

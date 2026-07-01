@@ -69,19 +69,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: existing, error: existingError } = await supabaseServer
+    const { data: existingActive, error: existingError } = await supabaseServer
       .from("resubmission_requests")
       .select("*")
       .eq("student_id", user.studentId)
       .eq("lab_id", labId)
-      .eq("status", "pending")
+      .in("status", ["pending", "approved"])
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (existingError) {
       return NextResponse.json({ success: false, error: existingError.message }, { status: 500 });
     }
 
-    if (existing) {
+    if (existingActive?.status === "approved") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "This resubmission has been approved and is waiting to be completed",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (existingActive) {
       const { data, error } = await supabaseServer
         .from("resubmission_requests")
         .update({
@@ -89,7 +101,7 @@ export async function POST(request: Request) {
           note,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", existing.id)
+        .eq("id", existingActive.id)
         .eq("status", "pending")
         .select("*")
         .single();

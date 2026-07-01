@@ -21,6 +21,7 @@ import {
   Users,
   ChevronsLeft,
   ChevronsRight,
+  XCircle,
 } from "lucide-react";
 
 import { useDebounce } from "@/hooks/useDebounce";
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -45,7 +47,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ROLE_ADMIN } from "@/lib/types/roles";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 
@@ -60,7 +69,8 @@ interface ResubmissionRequest {
   lab_id: string;
   drive_link: string;
   note?: string | null;
-  status: "pending" | "completed";
+  admin_note?: string | null;
+  status: "pending" | "approved" | "rejected" | "completed";
   created_at: string;
   updated_at: string;
   completed_at?: string | null;
@@ -83,6 +93,8 @@ interface PaginationMeta {
 interface ResubmissionSummary {
   total: number;
   pending: number;
+  approved: number;
+  rejected: number;
   completed: number;
 }
 
@@ -123,6 +135,8 @@ export default function AdminDashboardPage() {
   const debouncedRequestQuery = useDebounce(requestQuery, 400);
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [updatingRequestId, setUpdatingRequestId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<ResubmissionRequest | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
   const [requestPagination, setRequestPagination] = useState<PaginationMeta>({
     page: 1,
     pageSize: 10,
@@ -132,6 +146,8 @@ export default function AdminDashboardPage() {
   const [requestSummary, setRequestSummary] = useState<ResubmissionSummary>({
     total: 0,
     pending: 0,
+    approved: 0,
+    rejected: 0,
     completed: 0,
   });
 
@@ -242,20 +258,30 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!user) return;
     fetchRequests();
-  }, [user, requestStatus, requestPagination.page, requestPagination.pageSize, debouncedRequestQuery]);
+  }, [
+    user,
+    requestStatus,
+    requestPagination.page,
+    requestPagination.pageSize,
+    debouncedRequestQuery,
+  ]);
 
   useEffect(() => {
     if (!user || activeView !== "studentAccess") return;
     fetchAllowedEmails();
   }, [user, activeView, accessPagination.page, accessPagination.pageSize, debouncedAccessQuery]);
 
-  const handleComplete = async (id: string) => {
+  const handleUpdateRequestStatus = async (
+    id: string,
+    status: "approved" | "rejected" | "completed",
+    adminNote?: string
+  ) => {
     setUpdatingRequestId(id);
     try {
       const res = await fetch(`/api/admin/resubmissions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
+        body: JSON.stringify({ status, adminNote }),
       });
       const json = await res.json();
 
@@ -264,7 +290,17 @@ export default function AdminDashboardPage() {
         return;
       }
 
-      toast.success("Request marked as completed.");
+      toast.success(
+        status === "approved"
+          ? "Request approved."
+          : status === "completed"
+            ? "Request completed."
+            : "Request rejected."
+      );
+      if (status === "rejected") {
+        setRejectTarget(null);
+        setRejectNote("");
+      }
       const nextPage =
         requests.length === 1 && requestPagination.page > 1
           ? requestPagination.page - 1
@@ -277,6 +313,11 @@ export default function AdminDashboardPage() {
     } finally {
       setUpdatingRequestId(null);
     }
+  };
+
+  const handleOpenReject = (request: ResubmissionRequest) => {
+    setRejectTarget(request);
+    setRejectNote(request.admin_note || "");
   };
 
   const handleEditAccess = (item: AllowedEmail) => {
@@ -461,7 +502,9 @@ export default function AdminDashboardPage() {
               setRequestPagination((prev) => ({ ...prev, page: 1, pageSize }))
             }
             onRefresh={fetchRequests}
-            onComplete={handleComplete}
+            onApprove={(id) => handleUpdateRequestStatus(id, "approved")}
+            onComplete={(id) => handleUpdateRequestStatus(id, "completed")}
+            onReject={handleOpenReject}
           />
         ) : (
           <StudentAccessPanel
@@ -503,6 +546,23 @@ export default function AdminDashboardPage() {
         }}
         onConfirm={handleDeleteAccess}
       />
+
+      <RejectResubmissionDialog
+        target={rejectTarget}
+        note={rejectNote}
+        saving={Boolean(rejectTarget && updatingRequestId === rejectTarget.id)}
+        onNoteChange={setRejectNote}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectTarget(null);
+            setRejectNote("");
+          }
+        }}
+        onConfirm={() => {
+          if (!rejectTarget) return;
+          handleUpdateRequestStatus(rejectTarget.id, "rejected", rejectNote);
+        }}
+      />
     </div>
   );
 }
@@ -520,7 +580,9 @@ function ResubmissionPanel({
   onPageChange,
   onPageSizeChange,
   onRefresh,
+  onApprove,
   onComplete,
+  onReject,
 }: {
   requests: ResubmissionRequest[];
   stats: ResubmissionSummary;
@@ -534,7 +596,9 @@ function ResubmissionPanel({
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onRefresh: () => void;
+  onApprove: (id: string) => void;
   onComplete: (id: string) => void;
+  onReject: (request: ResubmissionRequest) => void;
 }) {
   return (
     <div className="motion-panel space-y-4">
@@ -553,8 +617,16 @@ function ResubmissionPanel({
                 <span className="font-extrabold text-amber-600">{stats.pending}</span>
               </div>
               <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1">
+                <span className="text-xs text-muted-foreground">Approved</span>
+                <span className="font-extrabold text-emerald-600">{stats.approved}</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1">
+                <span className="text-xs text-muted-foreground">Rejected</span>
+                <span className="font-extrabold text-red-600">{stats.rejected}</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1">
                 <span className="text-xs text-muted-foreground">Completed</span>
-                <span className="font-extrabold text-emerald-600">{stats.completed}</span>
+                <span className="font-extrabold text-sky-600">{stats.completed}</span>
               </div>
             </div>
 
@@ -567,6 +639,8 @@ function ResubmissionPanel({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="all">All</SelectItem>
                   </SelectContent>
@@ -581,7 +655,14 @@ function ResubmissionPanel({
                 className="flex-1 max-w-md"
               />
 
-              <Button variant="outline" size="icon" onClick={onRefresh} disabled={loading} title="Refresh" className="shrink-0">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onRefresh}
+                disabled={loading}
+                title="Refresh"
+                className="shrink-0"
+              >
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               </Button>
             </div>
@@ -596,26 +677,36 @@ function ResubmissionPanel({
                     <TableHead>Student</TableHead>
                     <TableHead className="w-[110px]">Class</TableHead>
                     <TableHead className="w-[110px]">Lab</TableHead>
-                    <TableHead>Note</TableHead>
+                    <TableHead>Notes</TableHead>
                     <TableHead className="w-[112px]">Status</TableHead>
-                    <TableHead className="w-[220px] text-right">Action</TableHead>
+                    <TableHead className="w-[330px] text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     Array.from({ length: 5 }).map((_, idx) => (
                       <TableRow key={idx}>
-                        <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-20" />
+                        </TableCell>
                         <TableCell>
                           <div className="space-y-1.5">
                             <Skeleton className="h-4 w-28" />
                             <Skeleton className="h-3 w-40" />
                           </div>
                         </TableCell>
-                        <TableCell><Skeleton className="h-4 w-12" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-44" /></TableCell>
-                        <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-12" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-16" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-44" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-5 w-16 rounded-full" />
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             <Skeleton className="h-8 w-10" />
@@ -650,9 +741,23 @@ function ResubmissionPanel({
                         <TableCell className="text-sm">{request.class_name || "N/A"}</TableCell>
                         <TableCell className="font-mono text-xs">{request.lab_id}</TableCell>
                         <TableCell>
-                          <p className="max-w-[260px] truncate text-sm text-muted-foreground" title={request.note || ""}>
-                            {request.note || "-"}
-                          </p>
+                          <div className="max-w-[300px] space-y-1 text-sm">
+                            <p
+                              className="truncate text-muted-foreground"
+                              title={request.note || ""}
+                            >
+                              <span className="font-medium text-foreground">Student:</span>{" "}
+                              {request.note || "-"}
+                            </p>
+                            {request.admin_note ? (
+                              <p
+                                className="truncate text-red-700 dark:text-red-300"
+                                title={request.admin_note}
+                              >
+                                <span className="font-medium">Admin:</span> {request.admin_note}
+                              </p>
+                            ) : null}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={request.status} />
@@ -667,7 +772,20 @@ function ResubmissionPanel({
                             </Button>
                             <Button
                               size="sm"
-                              disabled={request.status === "completed" || updatingId === request.id}
+                              disabled={request.status !== "pending" || updatingId === request.id}
+                              onClick={() => onApprove(request.id)}
+                            >
+                              {updatingId === request.id ? (
+                                <RefreshCw className="mr-2 h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                              )}
+                              Approve
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={request.status !== "approved" || updatingId === request.id}
                               onClick={() => onComplete(request.id)}
                             >
                               {updatingId === request.id ? (
@@ -676,6 +794,16 @@ function ResubmissionPanel({
                                 <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
                               )}
                               Complete
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              disabled={request.status !== "pending" || updatingId === request.id}
+                              onClick={() => onReject(request)}
+                            >
+                              <XCircle className="mr-2 h-3.5 w-3.5" />
+                              Reject
                             </Button>
                           </div>
                         </TableCell>
@@ -754,7 +882,13 @@ function StudentAccessPanel({
               />
 
               <div className="flex shrink-0 items-center gap-2">
-                <Button variant="outline" size="icon" onClick={onRefresh} disabled={loading} title="Refresh">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={onRefresh}
+                  disabled={loading}
+                  title="Refresh"
+                >
                   <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                 </Button>
                 <Button onClick={onAdd}>Add Student</Button>
@@ -762,89 +896,96 @@ function StudentAccessPanel({
             </div>
           </div>
 
-            <div className="overflow-hidden rounded-lg border border-border">
-              <div className="overflow-x-auto">
-                <Table className="min-w-[760px]">
-                  <TableHeader className="bg-muted/50">
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead>Email</TableHead>
-                      <TableHead className="w-[140px]">MSSV</TableHead>
-                      <TableHead className="w-[140px]">Class</TableHead>
-                      <TableHead className="w-[170px] text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? (
-                      Array.from({ length: 5 }).map((_, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Skeleton className="h-4 w-4 rounded-full" />
-                              <Skeleton className="h-4 w-48" />
-                            </div>
-                          </TableCell>
-                          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                          <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Skeleton className="h-8 w-10" />
-                              <Skeleton className="h-8 w-20" />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : allowedEmails.length === 0 ? (
-                      <EmptyTableRow colSpan={4} label="No student access records match the current filters." />
-                    ) : (
-                      allowedEmails.map((item, index) => (
-                        <TableRow
-                          key={item.email}
-                          className="motion-list-item"
-                          style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
-                        >
-                          <TableCell>
-                            <div className="flex min-w-0 items-center gap-2">
-                              <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
-                              <span className="truncate font-medium">{item.email}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{item.student_id}</TableCell>
-                          <TableCell>{item.class_name}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button variant="outline" size="sm" onClick={() => onEdit(item)}>
-                                <Pencil className="mr-2 h-3.5 w-3.5" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() => onDelete(item)}
-                              >
-                                <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                Delete
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[760px]">
+                <TableHeader className="bg-muted/50">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Email</TableHead>
+                    <TableHead className="w-[140px]">MSSV</TableHead>
+                    <TableHead className="w-[140px]">Class</TableHead>
+                    <TableHead className="w-[170px] text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    Array.from({ length: 5 }).map((_, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="h-4 w-4 rounded-full" />
+                            <Skeleton className="h-4 w-48" />
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-20" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-16" />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Skeleton className="h-8 w-10" />
+                            <Skeleton className="h-8 w-20" />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : allowedEmails.length === 0 ? (
+                    <EmptyTableRow
+                      colSpan={4}
+                      label="No student access records match the current filters."
+                    />
+                  ) : (
+                    allowedEmails.map((item, index) => (
+                      <TableRow
+                        key={item.email}
+                        className="motion-list-item"
+                        style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
+                      >
+                        <TableCell>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate font-medium">{item.email}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{item.student_id}</TableCell>
+                        <TableCell>{item.class_name}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => onEdit(item)}>
+                              <Pencil className="mr-2 h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => onDelete(item)}
+                            >
+                              <Trash2 className="mr-2 h-3.5 w-3.5" />
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
-            <TablePagination
-              pagination={pagination}
-              loading={loading}
-              onPageChange={onPageChange}
-              onPageSizeChange={onPageSizeChange}
-            />
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+          </div>
+          <TablePagination
+            pagination={pagination}
+            loading={loading}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 function TablePagination({
   pagination,
@@ -1015,7 +1156,8 @@ function DeleteStudentAccessDialog({
         <DialogHeader>
           <DialogTitle>Delete Student Access</DialogTitle>
           <DialogDescription>
-            This removes the Google sign-in whitelist entry for {target?.email}. The student will no longer be able to access the dashboard.
+            This removes the Google sign-in whitelist entry for {target?.email}. The student will no
+            longer be able to access the dashboard.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -1031,29 +1173,65 @@ function DeleteStudentAccessDialog({
   );
 }
 
-function MetricCard({ label, value, className = "" }: { label: string; value: number; className?: string }) {
+function RejectResubmissionDialog({
+  target,
+  note,
+  saving,
+  onNoteChange,
+  onOpenChange,
+  onConfirm,
+}: {
+  target: ResubmissionRequest | null;
+  note: string;
+  saving: boolean;
+  onNoteChange: (value: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const canReject = note.trim().length > 0 && !saving;
+
   return (
-    <Card className="border-border bg-card shadow-sm">
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={`mt-1 text-2xl font-extrabold ${className}`}>{value}</p>
-      </CardContent>
-    </Card>
+    <Dialog open={Boolean(target)} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Reject Resubmission Request</DialogTitle>
+          <DialogDescription>
+            Add a note for {target?.student_id} so the student knows what to fix before submitting
+            again.
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={note}
+          onChange={(event) => onNoteChange(event.target.value)}
+          placeholder="Explain why this resubmission is rejected"
+          className="min-h-[120px]"
+          aria-label="Reject note"
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={!canReject}>
+            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Reject Request
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function StatusBadge({ status }: { status: "pending" | "completed" }) {
-  return (
-    <Badge
-      className={
-        status === "pending"
-          ? "border-none bg-amber-500 text-white hover:bg-amber-600"
-          : "border-none bg-emerald-500 text-white hover:bg-emerald-600"
-      }
-    >
-      {status}
-    </Badge>
-  );
+function StatusBadge({ status }: { status: "pending" | "approved" | "rejected" | "completed" }) {
+  const className =
+    status === "pending"
+      ? "border-none bg-amber-500 text-white hover:bg-amber-600"
+      : status === "approved"
+        ? "border-none bg-emerald-500 text-white hover:bg-emerald-600"
+        : status === "completed"
+          ? "border-none bg-sky-600 text-white hover:bg-sky-700"
+          : "border-none bg-red-600 text-white hover:bg-red-700";
+
+  return <Badge className={className}>{status}</Badge>;
 }
 
 function EmptyTableRow({ colSpan, label }: { colSpan: number; label: string }) {

@@ -71,6 +71,7 @@ pip install requests
 ```python
 import json
 import requests
+from datetime import datetime, timezone
 
 # Cấu hình Supabase của bạn (Lấy ở Project Settings -> API trên Supabase)
 SUPABASE_URL = "https://your-project-id.supabase.co"
@@ -80,8 +81,38 @@ HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
+}
+
+UPSERT_HEADERS = {
+    **HEADERS,
     "Prefer": "resolution=merge-duplicates"  # Kích hoạt tính năng UPSERT (ghi đè nếu trùng)
 }
+
+def get_approved_resubmission(student_id, lab_id):
+    url = f"{SUPABASE_URL}/rest/v1/resubmission_requests"
+    params = {
+        "student_id": f"eq.{student_id}",
+        "lab_id": f"eq.{lab_id}",
+        "status": "eq.approved",
+        "order": "updated_at.desc",
+        "limit": "1",
+    }
+    response = requests.get(url, headers=HEADERS, params=params)
+    response.raise_for_status()
+    rows = response.json()
+    return rows[0] if rows else None
+
+def complete_resubmission(request_id):
+    url = f"{SUPABASE_URL}/rest/v1/resubmission_requests"
+    now = datetime.now(timezone.utc).isoformat()
+    params = {"id": f"eq.{request_id}", "status": "eq.approved"}
+    payload = {
+        "status": "completed",
+        "completed_at": now,
+        "updated_at": now,
+    }
+    response = requests.patch(url, headers=HEADERS, params=params, json=payload)
+    response.raise_for_status()
 
 def upload_class_grades(json_file_path, class_name, lab_id):
     # Đọc dữ liệu điểm chấm local
@@ -89,9 +120,15 @@ def upload_class_grades(json_file_path, class_name, lab_id):
         results = json.load(f)
         
     payload = []
+    approved_request_ids = []
     for item in results:
+        student_id = item["MSSV"]
+        approved_request = get_approved_resubmission(student_id, lab_id)
+        if approved_request:
+            approved_request_ids.append(approved_request["id"])
+
         payload.append({
-            "student_id": item["MSSV"],
+            "student_id": student_id,
             "lab_id": lab_id,
             "class_name": class_name,
             "score": item["Score"],
@@ -101,9 +138,11 @@ def upload_class_grades(json_file_path, class_name, lab_id):
         
     # Gửi POST request dạng UPSERT lên bảng submissions
     url = f"{SUPABASE_URL}/rest/v1/submissions"
-    response = requests.post(url, headers=HEADERS, json=payload)
+    response = requests.post(url, headers=UPSERT_HEADERS, json=payload)
     
     if response.status_code in [200, 201]:
+        for request_id in approved_request_ids:
+            complete_resubmission(request_id)
         print(f"Đã cập nhật bảng điểm lớp {class_name} - Bài {lab_id} thành công!")
     else:
         print(f"Lỗi khi upload điểm: {response.text}")

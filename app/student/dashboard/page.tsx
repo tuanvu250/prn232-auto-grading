@@ -18,14 +18,30 @@ import {
   ArrowUp,
   ExternalLink,
   RefreshCw,
+  TriangleAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 import { LabAssignment, SubmissionHistory, TestcaseResult } from "@/lib/api/studentData";
@@ -35,7 +51,8 @@ interface ResubmissionRequest {
   lab_id: string;
   drive_link: string;
   note?: string | null;
-  status: "pending" | "completed";
+  admin_note?: string | null;
+  status: "pending" | "approved" | "rejected" | "completed";
   updated_at: string;
   completed_at?: string | null;
 }
@@ -116,7 +133,9 @@ const getMethodBadge = (method: string) => {
     colorClass = "bg-[#f93e3e] text-white"; // Swagger red
   }
   return (
-    <span className={`inline-flex items-center justify-center rounded-sm px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center tracking-wide ${colorClass}`}>
+    <span
+      className={`inline-flex items-center justify-center rounded-sm px-2 py-0.5 text-[10px] font-bold min-w-[52px] text-center tracking-wide ${colorClass}`}
+    >
       {method}
     </span>
   );
@@ -149,6 +168,7 @@ export default function StudentDashboardPage() {
   const [savingResubmission, setSavingResubmission] = useState(false);
   const [driveLink, setDriveLink] = useState("");
   const [resubmitNote, setResubmitNote] = useState("");
+  const [resubmissionDialogOpen, setResubmissionDialogOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   // Toggle the scroll-to-top button while scrolling.
@@ -241,7 +261,8 @@ export default function StudentDashboardPage() {
         submittedAt: formatDate(sub.updated_at),
         score: Number(sub.score) || 0,
         status: mapStatus(sub.status || "", Number(sub.score) || 0),
-        testcasesPassed: Number(details.passed) || testcaseDetails.filter(t => t.status === "pass").length,
+        testcasesPassed:
+          Number(details.passed) || testcaseDetails.filter((t) => t.status === "pass").length,
         testcasesTotal: Number(details.total) || testcaseDetails.length,
         buildLogs,
         testcaseDetails,
@@ -322,7 +343,7 @@ export default function StudentDashboardPage() {
       const { method: methodB } = parseTestcase(b.name);
       const isSourceA = methodA === "SOURCE";
       const isSourceB = methodB === "SOURCE";
-      
+
       if (isSourceA && !isSourceB) return -1;
       if (!isSourceA && isSourceB) return 1;
       return 0;
@@ -338,11 +359,23 @@ export default function StudentDashboardPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "Passed":
-        return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white border-none">Passed</Badge>;
+        return (
+          <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white border-none">
+            Passed
+          </Badge>
+        );
       case "Failed":
-        return <Badge variant="destructive" className="border-none">Failed</Badge>;
+        return (
+          <Badge variant="destructive" className="border-none">
+            Failed
+          </Badge>
+        );
       case "Grading":
-        return <Badge className="bg-amber-500 hover:bg-amber-600 text-white border-none animate-pulse">Grading</Badge>;
+        return (
+          <Badge className="bg-amber-500 hover:bg-amber-600 text-white border-none animate-pulse">
+            Grading
+          </Badge>
+        );
       default:
         return <Badge variant="outline">Not Submitted</Badge>;
     }
@@ -386,6 +419,7 @@ export default function StudentDashboardPage() {
         return [json.data, ...others];
       });
       toast.success("Resubmission request sent. Admins will receive a Discord notification.");
+      setResubmissionDialogOpen(false);
     } catch (err) {
       console.error("Failed to save resubmission request:", err);
       toast.error("Unable to reach the server.");
@@ -476,7 +510,9 @@ export default function StudentDashboardPage() {
       return (
         <div className="flex flex-col items-center justify-center p-12 border border-dashed rounded-lg bg-card text-muted-foreground text-center gap-2">
           <p className="text-sm font-medium">No graded submissions yet</p>
-          <p className="text-xs text-muted-foreground">Submit your work through the grading system and results will appear here.</p>
+          <p className="text-xs text-muted-foreground">
+            Submit your work through the grading system and results will appear here.
+          </p>
         </div>
       );
     }
@@ -490,9 +526,7 @@ export default function StudentDashboardPage() {
               key={lab.id}
               onClick={() => handleSelectLab(lab)}
               style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
-              className={`w-full text-left rounded-lg border p-4 transition-all duration-200 ${
-                "motion-list-item "
-              }${
+              className={`w-full text-left rounded-lg border p-4 transition-all duration-200 ${"motion-list-item "}${
                 isSelected
                   ? "border-primary bg-primary/[0.02] shadow-sm"
                   : "border-border bg-card hover:bg-muted/50"
@@ -516,11 +550,7 @@ export default function StudentDashboardPage() {
                 </div>
               </div>
               <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                {lab.weight > 0 ? (
-                  <span>Weight: {lab.weight}%</span>
-                ) : (
-                  <span></span>
-                )}
+                {lab.weight > 0 ? <span>Weight: {lab.weight}%</span> : <span></span>}
                 {isSelected && (
                   <span className="flex items-center gap-0.5 text-primary font-medium">
                     Viewing <ChevronRight className="h-3 w-3" />
@@ -578,12 +608,8 @@ export default function StudentDashboardPage() {
                 key={lab.id}
                 onClick={() => handleSelectLab(lab, true)}
                 style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
-                className={`min-h-[116px] w-[78vw] max-w-[320px] shrink-0 snap-start rounded-lg border p-4 text-left transition-all duration-200 sm:w-[300px] ${
-                  "motion-list-item "
-                }${
-                  isSelected
-                    ? "border-primary bg-primary/[0.03]"
-                    : "border-border bg-card"
+                className={`min-h-[116px] w-[78vw] max-w-[320px] shrink-0 snap-start rounded-lg border p-4 text-left transition-all duration-200 sm:w-[300px] ${"motion-list-item "}${
+                  isSelected ? "border-primary bg-primary/[0.03]" : "border-border bg-card"
                 }`}
               >
                 <div className="flex h-full flex-col justify-between gap-3">
@@ -663,10 +689,14 @@ export default function StudentDashboardPage() {
                   {user.name} {user.className ? `(${user.className})` : ""}
                 </p>
                 <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                  {user.studentId ? `${user.studentId} | ` : ""}{user.email}
+                  {user.studentId ? `${user.studentId} | ` : ""}
+                  {user.email}
                 </p>
               </div>
-              <Badge variant="outline" className="hidden text-[10px] sm:inline-block border-primary/20 bg-primary/5 text-primary">
+              <Badge
+                variant="outline"
+                className="hidden text-[10px] sm:inline-block border-primary/20 bg-primary/5 text-primary"
+              >
                 Student
               </Badge>
             </div>
@@ -699,9 +729,7 @@ export default function StudentDashboardPage() {
                 </p>
               )}
             </div>
-            <span className="shrink-0 text-xs text-muted-foreground">
-              Total: {labs.length}
-            </span>
+            <span className="shrink-0 text-xs text-muted-foreground">Total: {labs.length}</span>
           </div>
           {renderLabSlider()}
         </div>
@@ -710,9 +738,7 @@ export default function StudentDashboardPage() {
         <section className="hidden space-y-4 lg:col-span-3 lg:sticky lg:top-20 lg:block lg:self-start lg:max-h-[calc(100vh-6rem)] overflow-y-auto pr-1 w-full min-w-0">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold tracking-tight">Lab Assignments</h2>
-            <span className="text-xs text-muted-foreground font-sans">
-              Total: {labs.length}
-            </span>
+            <span className="text-xs text-muted-foreground font-sans">Total: {labs.length}</span>
           </div>
 
           {renderLabList()}
@@ -733,9 +759,19 @@ export default function StudentDashboardPage() {
                         {user.studentId || "Student ID"}
                       </h3>
                       <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-                        <span>Status: <span className="font-semibold text-foreground">{selectedSubmission.status}</span></span>
+                        <span>
+                          Status:{" "}
+                          <span className="font-semibold text-foreground">
+                            {selectedSubmission.status}
+                          </span>
+                        </span>
                         <span>•</span>
-                        <span>Total score: <span className="font-extrabold text-foreground">{selectedSubmission.score.toFixed(2)} / 10</span></span>
+                        <span>
+                          Total score:{" "}
+                          <span className="font-extrabold text-foreground">
+                            {selectedSubmission.score.toFixed(2)} / 10
+                          </span>
+                        </span>
                         <span>•</span>
                         <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" /> At {selectedSubmission.submittedAt}
@@ -746,7 +782,9 @@ export default function StudentDashboardPage() {
                     {/* Version selection dropdown */}
                     {selectedLab.submissions.length > 1 && (
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs text-muted-foreground font-medium">Submission version:</span>
+                        <span className="text-xs text-muted-foreground font-medium">
+                          Submission version:
+                        </span>
                         <select
                           value={selectedSubmission.version}
                           onChange={(e) => {
@@ -767,7 +805,8 @@ export default function StudentDashboardPage() {
                   </div>
                 ) : (
                   <div className="rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground font-sans">
-                    This assignment has not been submitted yet. Submit your code through the grading system to receive results.
+                    This assignment has not been submitted yet. Submit your code through the grading
+                    system to receive results.
                   </div>
                 )}
 
@@ -775,77 +814,162 @@ export default function StudentDashboardPage() {
                   <div className="space-y-6">
                     {(() => {
                       const request = getSelectedResubmission();
-                      const isCompleted = request?.status === "completed";
-                      const canSubmit = driveLink.trim().length > 0 && !isCompleted && !savingResubmission;
+                      const isPending = request?.status === "pending";
+                      const isApproved = request?.status === "approved";
+                      const canSubmit =
+                        driveLink.trim().length > 0 && !isApproved && !savingResubmission;
+                      const requestStatusText = loadingResubmissions
+                        ? "Loading request status..."
+                        : request
+                          ? `Last updated: ${formatDate(request.updated_at)}`
+                          : "No resubmission request for this lab yet.";
 
                       return (
                         <div className="motion-panel rounded-lg border border-border bg-muted/20 p-4">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="text-sm font-bold text-foreground">Resubmission Request</h3>
+                                <h3 className="text-sm font-bold text-foreground">
+                                  Resubmission Request
+                                </h3>
                                 {request ? (
                                   <Badge
                                     className={
                                       request.status === "pending"
                                         ? "border-none bg-amber-500 text-white hover:bg-amber-600"
-                                        : "border-none bg-emerald-500 text-white hover:bg-emerald-600"
+                                        : request.status === "approved"
+                                          ? "border-none bg-emerald-500 text-white hover:bg-emerald-600"
+                                          : request.status === "completed"
+                                            ? "border-none bg-sky-600 text-white hover:bg-sky-700"
+                                            : "border-none bg-red-600 text-white hover:bg-red-700"
                                     }
                                   >
-                                    {request.status === "pending" ? "Pending" : "Completed"}
+                                    {request.status === "pending"
+                                      ? "Pending"
+                                      : request.status === "approved"
+                                        ? "Approved"
+                                        : request.status === "completed"
+                                          ? "Completed"
+                                          : "Rejected"}
                                   </Badge>
                                 ) : null}
                               </div>
                               <p className="mt-1 text-xs text-muted-foreground">
-                                Submit a Google Drive link for the selected lab. You can update the link while the request is pending.
+                                Submit a Google Drive link for the selected lab. You can submit
+                                again after admin review.
                               </p>
+                              <p className="mt-2 text-xs font-medium text-muted-foreground">
+                                {requestStatusText}
+                              </p>
+                              {request?.admin_note ? (
+                                <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 dark:border-red-950 dark:bg-red-950/30 dark:text-red-200">
+                                  Admin note: {request.admin_note}
+                                </p>
+                              ) : null}
                             </div>
-                            {request?.drive_link ? (
-                              <Button variant="outline" size="sm" asChild className="shrink-0">
-                                <a href={request.drive_link} target="_blank" rel="noreferrer">
-                                  <ExternalLink className="mr-2 h-3.5 w-3.5" />
-                                  Open Link
-                                </a>
+                            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                              {request?.drive_link ? (
+                                <Button variant="outline" size="sm" asChild>
+                                  <a href={request.drive_link} target="_blank" rel="noreferrer">
+                                    <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                                    Open Link
+                                  </a>
+                                </Button>
+                              ) : null}
+                              <Button
+                                size="sm"
+                                onClick={() => setResubmissionDialogOpen(true)}
+                                disabled={isApproved}
+                              >
+                                {isApproved
+                                  ? "Approved"
+                                  : isPending
+                                    ? "Update Request"
+                                    : request
+                                      ? "Submit Again"
+                                      : "Submit Request"}
                               </Button>
-                            ) : null}
+                            </div>
                           </div>
 
-                          <div className="mt-4 grid gap-3">
-                            <Input
-                              value={driveLink}
-                              onChange={(event) => setDriveLink(event.target.value)}
-                              placeholder="https://drive.google.com/..."
-                              disabled={isCompleted}
-                              aria-label="Google Drive resubmission link"
-                            />
-                            <Textarea
-                              value={resubmitNote}
-                              onChange={(event) => setResubmitNote(event.target.value)}
-                              placeholder="Optional note for admin"
-                              disabled={isCompleted}
-                              className="min-h-[72px]"
-                              aria-label="Resubmission note"
-                            />
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                              <p className="text-xs text-muted-foreground">
-                                {loadingResubmissions
-                                  ? "Loading request status..."
-                                  : request
-                                    ? `Last updated: ${formatDate(request.updated_at)}`
-                                    : "No resubmission request for this lab yet."}
-                              </p>
-                              <Button
-                                onClick={handleSaveResubmission}
-                                disabled={!canSubmit}
-                                className="sm:w-auto"
-                              >
-                                {savingResubmission ? (
-                                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                                ) : null}
-                                {request ? "Update Link" : "Submit Request"}
-                              </Button>
-                            </div>
-                          </div>
+                          <Dialog
+                            open={resubmissionDialogOpen}
+                            onOpenChange={setResubmissionDialogOpen}
+                          >
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>
+                                  {request
+                                    ? "Update Resubmission Request"
+                                    : "Submit Resubmission Request"}
+                                </DialogTitle>
+                                <DialogDescription>
+                                  Submit a Google Drive link for {selectedLab.title}. Admins will
+                                  review the request from the control console.
+                                </DialogDescription>
+                              </DialogHeader>
+
+                              <div className="grid gap-3">
+                                <div className="flex gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-3.5 text-sm leading-relaxed text-foreground ring-1 ring-primary/10">
+                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                                    <TriangleAlert className="h-4 w-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-extrabold text-primary">
+                                      Submission file requirement
+                                    </p>
+                                    <p className="mt-0.5 text-muted-foreground">
+                                      Compress your submission file and name it as{" "}
+                                      <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                                        Labx_MSSV
+                                      </span>
+                                      , for example{" "}
+                                      <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                                        Lab2_SE180123
+                                      </span>
+                                      .
+                                    </p>
+                                  </div>
+                                </div>
+                                <Input
+                                  value={driveLink}
+                                  onChange={(event) => setDriveLink(event.target.value)}
+                                  placeholder="https://drive.google.com/..."
+                                  disabled={isApproved}
+                                  aria-label="Google Drive resubmission link"
+                                />
+                                <Textarea
+                                  value={resubmitNote}
+                                  onChange={(event) => setResubmitNote(event.target.value)}
+                                  placeholder="Optional note for admin"
+                                  disabled={isApproved}
+                                  className="min-h-[96px]"
+                                  aria-label="Resubmission note"
+                                />
+                                <p className="text-xs text-muted-foreground">{requestStatusText}</p>
+                              </div>
+
+                              <DialogFooter>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setResubmissionDialogOpen(false)}
+                                  disabled={savingResubmission}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button onClick={handleSaveResubmission} disabled={!canSubmit}>
+                                  {savingResubmission ? (
+                                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : null}
+                                  {isPending
+                                    ? "Update Link"
+                                    : request
+                                      ? "Submit Again"
+                                      : "Submit Request"}
+                                </Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
                         </div>
                       );
                     })()}
@@ -855,28 +979,49 @@ export default function StudentDashboardPage() {
                       <Table className="max-lg:min-w-[680px]">
                         <TableHeader className="bg-muted/50 border-b">
                           <TableRow className="hover:bg-transparent">
-                            <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">Method</TableHead>
-                            <TableHead className="text-xs font-bold uppercase text-muted-foreground">URL / Rule</TableHead>
-                            <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">Pass</TableHead>
-                            <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">Awarded</TableHead>
-                            <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">Effective</TableHead>
-                            <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">HTTP</TableHead>
+                            <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                              Method
+                            </TableHead>
+                            <TableHead className="text-xs font-bold uppercase text-muted-foreground">
+                              URL / Rule
+                            </TableHead>
+                            <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
+                              Pass
+                            </TableHead>
+                            <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                              Awarded
+                            </TableHead>
+                            <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                              Effective
+                            </TableHead>
+                            <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
+                              HTTP
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {getSortedTestcases(selectedSubmission).map((tc, idx) => {
                             const { method, rule } = parseTestcase(tc.name);
                             const isPassed = tc.status === "pass";
-                            const awarded = tc.score !== undefined ? tc.score : (isPassed ? 1 : 0);
-                            const effective = tc.score !== undefined ? tc.score : (isPassed ? 1 : 0);
-                            const httpCode = tc.actualStatusCode !== undefined && tc.actualStatusCode !== null 
-                              ? tc.actualStatusCode 
-                              : (method === "SOURCE" ? "-" : "200");
+                            const awarded = tc.score !== undefined ? tc.score : isPassed ? 1 : 0;
+                            const effective = tc.score !== undefined ? tc.score : isPassed ? 1 : 0;
+                            const httpCode =
+                              tc.actualStatusCode !== undefined && tc.actualStatusCode !== null
+                                ? tc.actualStatusCode
+                                : method === "SOURCE"
+                                  ? "-"
+                                  : "200";
 
                             return (
-                              <TableRow key={idx} className="hover:bg-muted/5 border-b border-border/40 transition-colors">
+                              <TableRow
+                                key={idx}
+                                className="hover:bg-muted/5 border-b border-border/40 transition-colors"
+                              >
                                 <TableCell className="py-3">{getMethodBadge(method)}</TableCell>
-                                <TableCell className="py-3 font-mono text-xs text-foreground max-w-[180px] sm:max-w-[350px] truncate" title={rule}>
+                                <TableCell
+                                  className="py-3 font-mono text-xs text-foreground max-w-[180px] sm:max-w-[350px] truncate"
+                                  title={rule}
+                                >
                                   {rule}
                                 </TableCell>
                                 <TableCell className="py-3">
@@ -886,8 +1031,12 @@ export default function StudentDashboardPage() {
                                     <span className="text-red-500 font-bold text-base">X</span>
                                   )}
                                 </TableCell>
-                                <TableCell className="py-3 font-semibold text-xs text-foreground">{awarded.toFixed(1)}</TableCell>
-                                <TableCell className="py-3 font-semibold text-xs text-foreground">{effective.toFixed(1)}</TableCell>
+                                <TableCell className="py-3 font-semibold text-xs text-foreground">
+                                  {awarded.toFixed(1)}
+                                </TableCell>
+                                <TableCell className="py-3 font-semibold text-xs text-foreground">
+                                  {effective.toFixed(1)}
+                                </TableCell>
                                 <TableCell className="py-3 font-medium text-xs text-muted-foreground">
                                   {httpCode}
                                 </TableCell>
@@ -912,7 +1061,7 @@ export default function StudentDashboardPage() {
                               <div className="break-words text-xs font-bold text-muted-foreground font-mono [overflow-wrap:anywhere]">
                                 {method} {rule}
                               </div>
-                              
+
                               {/* Preformatted box for Response */}
                               {tc.actualResponse ? (
                                 <div className="w-full min-w-0 overflow-hidden rounded-lg border border-[#e2e8f0] bg-[#f8f9fa]">
@@ -946,7 +1095,9 @@ export default function StudentDashboardPage() {
               <div className="flex flex-col items-center gap-2 max-w-md">
                 <Code2 className="h-8 w-8 text-muted-foreground/60" />
                 <h3 className="font-bold text-foreground mt-2">No graded submissions yet</h3>
-                <p className="text-sm">You have not submitted any assignments to the automated grading system yet.</p>
+                <p className="text-sm">
+                  You have not submitted any assignments to the automated grading system yet.
+                </p>
               </div>
             </Card>
           )}

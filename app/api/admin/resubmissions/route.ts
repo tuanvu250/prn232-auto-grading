@@ -42,6 +42,16 @@ export async function GET(request: Request) {
       .select("id", { count: "exact", head: true })
       .eq("status", "pending");
 
+    const { count: approvedCount } = await supabaseServer
+      .from("resubmission_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "approved");
+
+    const { count: rejectedCount } = await supabaseServer
+      .from("resubmission_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "rejected");
+
     const { count: completedCount } = await supabaseServer
       .from("resubmission_requests")
       .select("id", { count: "exact", head: true })
@@ -52,8 +62,11 @@ export async function GET(request: Request) {
       data,
       pagination: createPaginationMeta(page, pageSize, count || 0),
       summary: {
-        total: (pendingCount || 0) + (completedCount || 0),
+        total:
+          (pendingCount || 0) + (approvedCount || 0) + (rejectedCount || 0) + (completedCount || 0),
         pending: pendingCount || 0,
+        approved: approvedCount || 0,
+        rejected: rejectedCount || 0,
         completed: completedCount || 0,
       },
     });
