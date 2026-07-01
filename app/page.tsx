@@ -9,6 +9,7 @@ import { GraduationCap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { generateMockJWT, setAuthCookie } from "@/lib/utils/auth";
 import { ROLE_ADMIN, ROUTE_MAP } from "@/lib/types/roles";
+import { googleLoginAction } from "@/lib/actions/auth";
 
 interface GoogleUserPayload {
   email: string;
@@ -57,17 +58,12 @@ export default function HomePage() {
         return;
       }
 
-      const roleRes = await fetch("/api/auth/google-login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: decoded.email }),
-      });
-      const roleJson = await roleRes.json();
+      const roleJson = await googleLoginAction(decoded.email);
 
-      if (!roleRes.ok || !roleJson.success) {
-        console.error("Access validation failed:", roleJson.error);
+      if (!roleJson.success || !roleJson.data) {
+        console.error("Access validation failed:", !roleJson.success ? roleJson.error : "No data returned");
         toast.error(
-          roleRes.status === 403
+          !roleJson.success && roleJson.error === "Email is not allowed"
             ? "Your email is not allowed to access this system."
             : "Unable to validate access. Please try again."
         );

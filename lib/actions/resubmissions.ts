@@ -1,14 +1,8 @@
-import { NextResponse } from "next/server";
+"use server";
 
 import { notifyDiscordResubmission } from "@/lib/server/discord";
 import { getServerUser } from "@/lib/server/auth";
 import { supabaseServer } from "@/lib/server/supabase";
-
-interface ResubmissionRequest {
-  labId?: string;
-  driveLink?: string;
-  note?: string;
-}
 
 function isDriveLink(url: string) {
   try {
@@ -19,11 +13,11 @@ function isDriveLink(url: string) {
   }
 }
 
-export async function GET() {
+export async function getStudentResubmissionsAction() {
   try {
     const user = await getServerUser();
     if (!user?.studentId) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+      return { success: false, error: "Unauthorized" };
     }
 
     const { data, error } = await supabaseServer
@@ -33,40 +27,37 @@ export async function GET() {
       .order("updated_at", { ascending: false });
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return { success: false, error: error.message };
     }
 
-    return NextResponse.json({ success: true, data });
+    return { success: true, data };
   } catch (err) {
     console.error("Error fetching student resubmissions:", err);
-    return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
+    return { success: false, error: "Internal Server Error" };
   }
 }
 
-export async function POST(request: Request) {
+export async function createResubmissionAction(payload: {
+  labId: string;
+  driveLink: string;
+  note?: string | null;
+}) {
   try {
     const user = await getServerUser();
     if (!user?.studentId || !user.email) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+      return { success: false, error: "Unauthorized" };
     }
 
-    const body = (await request.json()) as ResubmissionRequest;
-    const labId = body.labId?.trim();
-    const driveLink = body.driveLink?.trim();
-    const note = body.note?.trim() || null;
+    const labId = payload.labId?.trim();
+    const driveLink = payload.driveLink?.trim();
+    const note = payload.note?.trim() || null;
 
     if (!labId || !driveLink) {
-      return NextResponse.json(
-        { success: false, error: "Lab ID and Drive link are required" },
-        { status: 400 }
-      );
+      return { success: false, error: "Lab ID and Drive link are required" };
     }
 
     if (!isDriveLink(driveLink)) {
-      return NextResponse.json(
-        { success: false, error: "Drive link must be a valid Google Drive URL" },
-        { status: 400 }
-      );
+      return { success: false, error: "Drive link must be a valid Google Drive URL" };
     }
 
     const { data: existingActive, error: existingError } = await supabaseServer
@@ -80,17 +71,14 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (existingError) {
-      return NextResponse.json({ success: false, error: existingError.message }, { status: 500 });
+      return { success: false, error: existingError.message };
     }
 
     if (existingActive?.status === "approved") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "This resubmission has been approved and is waiting to be completed",
-        },
-        { status: 400 }
-      );
+      return {
+        success: false,
+        error: "This resubmission has been approved and is waiting to be completed",
+      };
     }
 
     if (existingActive) {
@@ -107,7 +95,7 @@ export async function POST(request: Request) {
         .single();
 
       if (error) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        return { success: false, error: error.message };
       }
 
       await notifyDiscordResubmission({
@@ -121,7 +109,7 @@ export async function POST(request: Request) {
         note: note || undefined,
       });
 
-      return NextResponse.json({ success: true, data });
+      return { success: true, data };
     }
 
     const { data, error } = await supabaseServer
@@ -140,7 +128,7 @@ export async function POST(request: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return { success: false, error: error.message };
     }
 
     await notifyDiscordResubmission({
@@ -154,9 +142,9 @@ export async function POST(request: Request) {
       note: note || undefined,
     });
 
-    return NextResponse.json({ success: true, data }, { status: 201 });
+    return { success: true, data };
   } catch (err) {
     console.error("Error saving resubmission request:", err);
-    return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
+    return { success: false, error: "Internal Server Error" };
   }
 }
