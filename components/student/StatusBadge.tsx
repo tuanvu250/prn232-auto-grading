@@ -9,11 +9,7 @@ interface StatusBadgeProps {
 export function StatusBadge({ status }: StatusBadgeProps) {
   switch (status) {
     case "Passed":
-      return (
-        <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white border-none">
-          Passed
-        </Badge>
-      );
+      return null;
     case "Failed":
       return (
         <Badge variant="destructive" className="border-none">

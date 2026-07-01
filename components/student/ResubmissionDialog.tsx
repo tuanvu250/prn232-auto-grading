@@ -86,6 +86,28 @@ export function ResubmissionDialog({
             </div>
           )}
 
+          <div className="flex gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-3.5 text-sm leading-relaxed text-foreground ring-1 ring-primary/10">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <TriangleAlert className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-extrabold text-primary">
+                Submission file requirement
+              </p>
+              <p className="mt-0.5 text-muted-foreground">
+                Compress your submission file and name it as{" "}
+                <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                  Labx_MSSV
+                </span>
+                , for example{" "}
+                <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                  Lab2_SE180123
+                </span>
+                .
+              </p>
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <span className="text-xs font-semibold text-muted-foreground">Google Drive Link</span>
             <Input

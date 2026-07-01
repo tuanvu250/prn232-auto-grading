@@ -1,8 +1,27 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import {
+  Clock,
+  ExternalLink,
+  RefreshCw,
+  TriangleAlert,
+  CheckCircle2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -11,18 +30,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  ArrowUp,
-  Clock,
-  Code2,
-  ExternalLink,
-  RefreshCw,
-  User as UserIcon,
-} from "lucide-react";
-import { LabAssignment, SubmissionHistory, TestcaseResult } from "@/lib/api/studentData";
+import { LabAssignment, SubmissionHistory } from "@/lib/api/studentData";
 import { UserPayload } from "@/lib/utils/auth";
-import { ResubmissionRequest } from "./ResubmissionDialog";
-import { StatusBadge } from "./StatusBadge";
+import { createResubmissionAction } from "@/lib/actions/resubmissions";
+
+export interface ResubmissionRequest {
+  id: string;
+  lab_id: string;
+  drive_link: string;
+  note?: string | null;
+  admin_note?: string | null;
+  status: "pending" | "approved" | "rejected" | "completed";
+  updated_at: string;
+  completed_at?: string | null;
+}
 
 interface DiagnosticConsoleProps {
   user: UserPayload;
@@ -30,8 +51,50 @@ interface DiagnosticConsoleProps {
   selectedSubmission: SubmissionHistory | null;
   onSelectSubmission: (submission: SubmissionHistory) => void;
   resubmissions: ResubmissionRequest[];
-  onOpenResubmissionDialog: () => void;
+  loadingResubmissions: boolean;
+  onResubmissionSaved: (request: ResubmissionRequest) => void;
 }
+
+const formatDate = (dateStr: string) => {
+  try {
+    const d = new Date(dateStr);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+  } catch {
+    return dateStr;
+  }
+};
+
+const renderHighlightedRule = (rule: string) => {
+  const parts = rule.split(/(\s+)/);
+  return (
+    <span className="[overflow-wrap:anywhere] break-words">
+      {parts.map((part, index) => {
+        const cleanPart = part.trim();
+        const isEndpoint =
+          cleanPart.startsWith("/") ||
+          cleanPart.startsWith("http://") ||
+          cleanPart.startsWith("https://");
+        if (isEndpoint && cleanPart.length > 2) {
+          return (
+            <span
+              key={index}
+              className="font-mono bg-primary/[0.04] text-primary border border-primary/10 rounded px-1.5 py-0.5 text-[11px]"
+            >
+              {part}
+            </span>
+          );
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </span>
+  );
+};
 
 const parseTestcase = (tcName: string) => {
   const match = tcName.match(/^\[(.*?)\]\s*(.*)$/);
@@ -78,55 +141,88 @@ const formatResponse = (response: string) => {
   }
 };
 
-const getSortedTestcases = (submission: SubmissionHistory) => {
-  return [...submission.testcaseDetails].sort((a, b) => {
-    const { method: methodA } = parseTestcase(a.name);
-    const { method: methodB } = parseTestcase(b.name);
-    const isSourceA = methodA === "SOURCE";
-    const isSourceB = methodB === "SOURCE";
-
-    if (isSourceA && !isSourceB) return -1;
-    if (!isSourceA && isSourceB) return 1;
-    return 0;
-  });
-};
-
 export function DiagnosticConsole({
   user,
   selectedLab,
   selectedSubmission,
   onSelectSubmission,
   resubmissions,
-  onOpenResubmissionDialog,
+  loadingResubmissions,
+  onResubmissionSaved,
 }: DiagnosticConsoleProps) {
+  const [resubmissionDialogOpen, setResubmissionDialogOpen] = useState(false);
+  const [driveLink, setDriveLink] = useState("");
+  const [resubmitNote, setResubmitNote] = useState("");
+  const [savingResubmission, setSavingResubmission] = useState(false);
+
+  const getSelectedResubmission = () => {
+    return resubmissions.find((request) => request.lab_id === selectedLab.id) || null;
+  };
+
+  const request = getSelectedResubmission();
+
+  // Sync driveLink and resubmitNote when lab changes or request changes
+  useEffect(() => {
+    setDriveLink(request?.drive_link || "");
+    setResubmitNote(request?.note || "");
+  }, [selectedLab, request]);
+
   if (!selectedSubmission) {
     return (
-      <Card className="border-border bg-card shadow-sm h-full flex flex-col justify-center items-center p-12 text-muted-foreground text-center">
-        <p className="text-sm font-medium">No submission record selected</p>
-      </Card>
+      <div className="rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground font-sans">
+        This assignment has not been submitted yet. Submit your code through the grading
+        system to receive results.
+      </div>
     );
   }
 
-  const currentRequest = resubmissions.find((request) => request.lab_id === selectedLab.id);
+  const isPending = request?.status === "pending";
+  const isApproved = request?.status === "approved";
+  const isCompleted = request?.status === "completed";
+  const canSubmit = driveLink.trim().length > 0 && !isApproved && !savingResubmission;
 
-  const getResubmitButtonText = () => {
-    if (!currentRequest) return "Request Resubmission";
-    if (currentRequest.status === "pending") return "Pending Admin Review";
-    if (currentRequest.status === "approved") return "Request Approved";
-    if (currentRequest.status === "rejected") return "Request Rejected - Edit";
-    return "Request Resubmission";
+  const requestStatusText = loadingResubmissions
+    ? "Loading request status..."
+    : request
+      ? `Last updated: ${formatDate(request.updated_at)}`
+      : "No resubmission request for this lab yet.";
+
+  const handleSaveResubmission = async () => {
+    setSavingResubmission(true);
+    try {
+      const json = await createResubmissionAction({
+        labId: selectedLab.id,
+        driveLink,
+        note: resubmitNote,
+      });
+
+      if (!json.success) {
+        toast.error(json.error || "Unable to submit the resubmission request.");
+        return;
+      }
+
+      onResubmissionSaved(json.data);
+      toast.success("Resubmission request sent. Admins will receive a Discord notification.");
+      setResubmissionDialogOpen(false);
+    } catch (err) {
+      console.error("Failed to save resubmission request:", err);
+      toast.error("Unable to reach the server.");
+    } finally {
+      setSavingResubmission(false);
+    }
   };
 
-  const getResubmitButtonVariant = () => {
-    if (!currentRequest) return "outline";
-    if (currentRequest.status === "approved") return "secondary";
-    if (currentRequest.status === "rejected") return "destructive";
-    return "secondary";
-  };
+  const getSortedTestcases = (submission: SubmissionHistory) => {
+    return [...submission.testcaseDetails].sort((a, b) => {
+      const { method: methodA } = parseTestcase(a.name);
+      const { method: methodB } = parseTestcase(b.name);
+      const isSourceA = methodA === "SOURCE";
+      const isSourceB = methodB === "SOURCE";
 
-  const isResubmissionDisabled = () => {
-    if (!currentRequest) return false;
-    return currentRequest.status === "approved" || currentRequest.status === "completed";
+      if (isSourceA && !isSourceB) return -1;
+      if (!isSourceA && isSourceB) return 1;
+      return 0;
+    });
   };
 
   return (
@@ -184,189 +280,302 @@ export function DiagnosticConsole({
           )}
         </div>
 
-        {/* Diagnostic Metrics Cards */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border border-border/80 bg-card p-3 shadow-sm transition-all hover:bg-muted/20">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Final Grade
-            </span>
-            <div className="mt-1 flex items-baseline gap-1">
-              <span className="text-2xl font-black text-foreground">
-                {selectedSubmission.score.toFixed(1)}
-              </span>
-              <span className="text-xs text-muted-foreground">/ 10</span>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/80 bg-card p-3 shadow-sm transition-all hover:bg-muted/20">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Testcases Passed
-            </span>
-            <div className="mt-1 flex items-baseline gap-1">
-              <span className="text-2xl font-black text-foreground">
-                {selectedSubmission.testcasesPassed}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                / {selectedSubmission.testcasesTotal}
-              </span>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/80 bg-card p-3 shadow-sm transition-all hover:bg-muted/20">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Status
-            </span>
-            <div className="mt-2.5">
-              <StatusBadge status={selectedSubmission.status} />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/80 bg-card p-3 shadow-sm transition-all hover:bg-muted/20">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              Action
-            </span>
-            <div className="mt-1.5">
-              <Button
-                variant={getResubmitButtonVariant()}
-                size="sm"
-                onClick={onOpenResubmissionDialog}
-                disabled={isResubmissionDisabled()}
-                className="w-full text-xs font-bold h-8 transition-transform duration-100 active:scale-95"
-              >
-                {getResubmitButtonText()}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Build logs block */}
-        {selectedSubmission.buildLogs &&
-          (selectedSubmission.buildLogs.includes("error") ||
-            selectedSubmission.buildLogs.includes("failed") ||
-            selectedSubmission.buildLogs.includes("Exception")) && (
-            <div className="space-y-2">
-              <h4 className="flex items-center gap-1.5 text-xs font-bold text-red-600 dark:text-red-400">
-                <TriangleAlert className="h-4 w-4" /> Build Diagnostic Logs
-              </h4>
-              <div className="rounded-lg border border-red-200 bg-red-50/50 p-4 dark:border-red-950/30 dark:bg-red-950/10">
-                <pre className="overflow-x-auto font-mono text-xs text-red-800 dark:text-red-300 leading-relaxed whitespace-pre-wrap">
-                  {selectedSubmission.buildLogs}
-                </pre>
+        <div className="space-y-6">
+          {/* Resubmission Request Section */}
+          <div className="motion-panel rounded-lg border border-border bg-muted/20 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold text-foreground">
+                    Resubmission Request
+                  </h3>
+                  {request ? (
+                    <Badge
+                      className={
+                        request.status === "pending"
+                          ? "border-none bg-amber-500 text-white hover:bg-amber-600"
+                          : request.status === "approved"
+                            ? "border-none bg-emerald-500 text-white hover:bg-emerald-600"
+                            : request.status === "completed"
+                              ? "border-none bg-sky-600 text-white hover:bg-sky-700"
+                              : "border-none bg-red-600 text-white hover:bg-red-700"
+                      }
+                    >
+                      {request.status === "pending"
+                        ? "Pending"
+                        : request.status === "approved"
+                          ? "Approved"
+                          : request.status === "completed"
+                            ? "Completed"
+                            : "Rejected"}
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Submit a Google Drive link for the selected lab. You can submit
+                  again after admin review.
+                </p>
+                <p className="mt-2 text-xs font-medium text-muted-foreground">
+                  {requestStatusText}
+                </p>
+                {request?.admin_note ? (
+                  <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 dark:border-red-950 dark:bg-red-950/30 dark:text-red-200">
+                    Admin note: {request.admin_note}
+                  </p>
+                ) : null}
               </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {request?.drive_link ? (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={request.drive_link} target="_blank" rel="noreferrer">
+                      <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                      Open Link
+                    </a>
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  onClick={() => setResubmissionDialogOpen(true)}
+                  disabled={isApproved}
+                  variant={isCompleted ? "outline" : "default"}
+                >
+                  {isApproved
+                    ? "Approved"
+                    : isPending
+                      ? "Update Request"
+                      : request
+                        ? "Submit Again"
+                        : "Submit Request"}
+                </Button>
+              </div>
+            </div>
+
+            <Dialog
+              open={resubmissionDialogOpen}
+              onOpenChange={setResubmissionDialogOpen}
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>
+                    {request
+                      ? "Update Resubmission Request"
+                      : "Submit Resubmission Request"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Submit a Google Drive link for {selectedLab.title}. Admins will
+                    review the request from the control console.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="grid gap-3">
+                  <div className="flex gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-3.5 text-sm leading-relaxed text-foreground ring-1 ring-primary/10">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <TriangleAlert className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-extrabold text-primary">
+                        Submission file requirement
+                      </p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        Compress your submission file and name it as{" "}
+                        <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                          Labx_MSSV
+                        </span>
+                        , for example{" "}
+                        <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                          Lab2_SE180123
+                        </span>
+                        .
+                      </p>
+                    </div>
+                  </div>
+                  <Input
+                    value={driveLink}
+                    onChange={(event) => setDriveLink(event.target.value)}
+                    placeholder="https://drive.google.com/..."
+                    disabled={isApproved}
+                    aria-label="Google Drive resubmission link"
+                  />
+                  <Textarea
+                    value={resubmitNote}
+                    onChange={(event) => setResubmitNote(event.target.value)}
+                    placeholder="Optional note for admin"
+                    disabled={isApproved}
+                    className="min-h-[96px]"
+                    aria-label="Resubmission note"
+                  />
+                  <p className="text-xs text-muted-foreground">{requestStatusText}</p>
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setResubmissionDialogOpen(false)}
+                    disabled={savingResubmission}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveResubmission} disabled={!canSubmit}>
+                    {savingResubmission ? (
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
+                    {isPending
+                      ? "Update Link"
+                      : request
+                        ? "Submit Again"
+                        : "Submit Request"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {/* Build logs block */}
+          {selectedSubmission.buildLogs && (
+            <div className="space-y-2">
+              {(() => {
+                const isErrorBuild =
+                  (selectedSubmission.buildLogs.toLowerCase().includes("error") ||
+                    selectedSubmission.buildLogs.toLowerCase().includes("failed") ||
+                    selectedSubmission.buildLogs.toLowerCase().includes("exception")) &&
+                  !selectedSubmission.buildLogs.includes("No error logs found") &&
+                  !selectedSubmission.buildLogs.includes("Build succeeded");
+
+                return isErrorBuild ? (
+                  <>
+                    <h4 className="flex items-center gap-1.5 text-xs font-bold text-red-600 dark:text-red-400">
+                      <TriangleAlert className="h-4 w-4" /> Build Diagnostic Logs
+                    </h4>
+                    <div className="rounded-lg border border-red-200 bg-red-50/50 p-4 dark:border-red-950/30 dark:bg-red-950/10">
+                      <pre className="overflow-x-auto font-mono text-xs text-red-800 dark:text-red-300 leading-relaxed whitespace-pre-wrap">
+                        {selectedSubmission.buildLogs}
+                      </pre>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h4 className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="h-4 w-4" /> Build Diagnostic Logs
+                    </h4>
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-950/30 dark:bg-emerald-950/10">
+                      <pre className="overflow-x-auto font-mono text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed whitespace-pre-wrap">
+                        {selectedSubmission.buildLogs}
+                      </pre>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
-        {/* Testcases Logs and Console */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="font-sans text-sm font-bold tracking-tight text-foreground flex items-center gap-1.5">
-              <Code2 className="h-4 w-4 text-muted-foreground" /> Diagnostic Logs
-            </h4>
-            <span className="text-xs text-muted-foreground">
-              Pass rate:{" "}
-              {selectedSubmission.testcasesTotal > 0
-                ? Math.round(
-                    (selectedSubmission.testcasesPassed / selectedSubmission.testcasesTotal) * 100
-                  )
-                : 0}
-              %
-            </span>
-          </div>
+          {/* Testcases list Table */}
+          <div className="border border-border rounded-lg overflow-hidden overflow-x-auto bg-card w-full">
+            <Table className="max-lg:min-w-[680px]">
+              <TableHeader className="bg-muted/50 border-b">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                    Method
+                  </TableHead>
+                  <TableHead className="text-xs font-bold uppercase text-muted-foreground">
+                    URL / Rule
+                  </TableHead>
+                  <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
+                    Pass
+                  </TableHead>
+                  <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                    Awarded
+                  </TableHead>
+                  <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
+                    HTTP
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {getSortedTestcases(selectedSubmission).map((tc, idx) => {
+                  const { method, rule } = parseTestcase(tc.name);
+                  const isPassed = tc.status === "pass";
+                  const awarded = tc.score !== undefined ? tc.score : isPassed ? 1 : 0;
+                  const httpCode =
+                    tc.actualStatusCode !== undefined && tc.actualStatusCode !== null
+                      ? tc.actualStatusCode
+                      : method === "SOURCE"
+                        ? "-"
+                        : "200";
 
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-muted/50">
-                  <TableRow>
-                    <TableHead className="w-[100px] text-xs font-bold">Method</TableHead>
-                    <TableHead className="text-xs font-bold">Requirement / Path</TableHead>
-                    <TableHead className="w-[80px] text-xs font-bold">Score</TableHead>
-                    <TableHead className="w-[100px] text-right text-xs font-bold">Result</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedSubmission.testcaseDetails.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="h-24 text-center text-xs text-muted-foreground">
-                        No logs recorded for this submission.
+                  return (
+                    <TableRow
+                      key={idx}
+                      className="hover:bg-muted/5 border-b border-border/40 transition-colors"
+                    >
+                      <TableCell className="py-3">{getMethodBadge(method)}</TableCell>
+                      <TableCell
+                        className="py-3 text-xs text-foreground max-w-[180px] sm:max-w-[350px] truncate"
+                        title={rule}
+                      >
+                        {renderHighlightedRule(rule)}
+                      </TableCell>
+                      <TableCell className="py-3">
+                        {isPassed ? (
+                          <span className="text-emerald-500 font-bold text-base">✓</span>
+                        ) : (
+                          <span className="text-red-500 font-bold text-base">X</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-3 font-semibold text-xs text-foreground">
+                        {awarded.toFixed(1)}
+                      </TableCell>
+                      <TableCell className="py-3 font-medium text-xs text-muted-foreground">
+                        {httpCode}
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    getSortedTestcases(selectedSubmission).map((tc, index) => {
-                      const { method, rule } = parseTestcase(tc.name);
-                      return (
-                        <TableRow key={index} className="group hover:bg-muted/30 transition-colors">
-                          <TableCell className="align-top py-3">{getMethodBadge(method)}</TableCell>
-                          <TableCell className="align-top font-sans text-xs py-3 max-w-lg">
-                            <div className="space-y-1">
-                              <p className="font-medium text-foreground whitespace-pre-wrap leading-relaxed">
-                                {rule}
-                              </p>
-                              {tc.message && (
-                                <div className="rounded bg-destructive/5 p-2.5 text-[11px] text-destructive leading-relaxed border border-destructive/10 whitespace-pre-wrap">
-                                  {tc.message}
-                                </div>
-                              )}
-                              {tc.actualResponse && (
-                                <div className="mt-2 space-y-1">
-                                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-                                    Response Body
-                                  </span>
-                                  <pre className="rounded border border-border/80 bg-muted/40 p-2.5 font-mono text-[10px] text-muted-foreground overflow-x-auto leading-relaxed max-h-[160px] overflow-y-auto">
-                                    {formatResponse(tc.actualResponse)}
-                                  </pre>
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="align-top py-3 text-xs font-semibold text-foreground">
-                            {tc.score !== undefined && tc.maxScore !== undefined
-                              ? `${tc.score}/${tc.maxScore}`
-                              : "--"}
-                          </TableCell>
-                          <TableCell className="align-top text-right py-3">
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide ${
-                                tc.status === "pass"
-                                  ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/5 dark:text-emerald-400"
-                                  : "bg-red-500/10 text-red-600 dark:bg-red-500/5 dark:text-red-400"
-                              }`}
-                            >
-                              {tc.status === "pass" ? "Passed" : "Failed"}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Response details Section */}
+          <div className="mt-8 min-w-0 space-y-4">
+            <h3 className="text-base font-bold font-sans tracking-tight text-foreground border-b pb-2">
+              Response details
+            </h3>
+            <div className="min-w-0 space-y-4">
+              {getSortedTestcases(selectedSubmission).map((tc, idx) => {
+                const { method, rule } = parseTestcase(tc.name);
+                return (
+                  <div key={idx} className="min-w-0 space-y-1.5">
+                    {/* Header: Method Rule */}
+                    <div className="break-words text-xs font-bold text-muted-foreground font-mono [overflow-wrap:anywhere] flex items-center gap-1.5">
+                      {getMethodBadge(method)}
+                      {renderHighlightedRule(rule)}
+                    </div>
+
+                    {/* Preformatted box for Response */}
+                    {tc.actualResponse ? (
+                      <div className="w-full min-w-0 overflow-hidden rounded-lg border border-[#e2e8f0] bg-[#f8f9fa]">
+                        <pre className="max-w-full overflow-x-auto p-3.5 text-[13px] font-mono leading-relaxed text-slate-800 whitespace-pre sm:text-sm lg:overflow-visible lg:text-xs lg:whitespace-pre-wrap lg:break-all">
+                          {formatResponse(tc.actualResponse)}
+                        </pre>
+                      </div>
+                    ) : (
+                      <div className="text-xs italic text-muted-foreground/60 pl-3">
+                        No response details available
+                      </div>
+                    )}
+
+                    {/* Red error message if failed */}
+                    {tc.status === "fail" && tc.message && (
+                      <p className="mt-1 break-words pl-1 text-xs font-semibold text-red-500 font-sans [overflow-wrap:anywhere]">
+                        {tc.message}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-// Add mock/placeholder icon if TriangleAlert is not present in imports.
-function TriangleAlert(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
   );
 }
