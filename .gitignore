@@ -42,3 +42,8 @@ next-env.d.ts
 
 
 .cursor/
+.claude/
+.codex/
+.gemini/
+.fk-skills/
+.agents/

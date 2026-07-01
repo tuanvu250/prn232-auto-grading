@@ -7,14 +7,15 @@ export type UserRole = typeof ROLE_ADMIN | typeof ROLE_TEACHER | typeof ROLE_STU
 
 export const PUBLIC_ROUTES = ["/", "/landing", "/login", "/register", "/reset-password"] as const;
 
-export const AUTH_ROUTES = ["/login", "/register", "/reset-password"] as const;
+export const AUTH_ROUTES = ["/", "/login", "/register", "/reset-password"] as const;
 
 export const ROUTE_MAP = {
   adminDashboard: "/admin/dashboard",
   teacherDashboard: "/teacher/dashboard",
   studentDashboard: "/student/dashboard",
-  login: "/login",
+  login: "/",
 } as const;
+
 
 export function normalizeRoles(roles: string[]): string[] {
   return roles.map((r) => (r === ROLE_INSTRUCTOR ? ROLE_TEACHER : r));
