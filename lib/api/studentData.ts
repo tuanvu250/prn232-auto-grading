@@ -28,6 +28,6 @@ export interface LabAssignment {
   dueDate: string;
   status: "Passed" | "Failed" | "Grading" | "NotSubmitted";
   currentScore: number;
-  weight: number; // Tỷ trọng điểm (ví dụ: 10%)
+  weight: number; // Grade weight, for example 10%.
   submissions: SubmissionHistory[];
 }

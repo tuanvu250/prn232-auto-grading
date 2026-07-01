@@ -8,8 +8,7 @@ import { toast } from "sonner";
 import { GraduationCap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { generateMockJWT, setAuthCookie } from "@/lib/utils/auth";
-import { ROLE_STUDENT, ROUTE_MAP } from "@/lib/types/roles";
-import { supabase } from "@/lib/supabase";
+import { ROLE_ADMIN, ROUTE_MAP } from "@/lib/types/roles";
 
 interface GoogleUserPayload {
   email: string;
@@ -21,7 +20,7 @@ export default function HomePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  // Xử lý sau khi đăng nhập thành công
+  // Handle a successful sign-in.
   const handleLoginSuccess = (payload: {
     email: string;
     name: string;
@@ -33,19 +32,18 @@ export default function HomePage() {
     try {
       const token = generateMockJWT(payload);
       setAuthCookie(token);
-      toast.success("Đăng nhập thành công bằng tài khoản Google!");
+      toast.success("Signed in with Google.");
       
-      // Tất cả tài khoản Google đăng nhập thành công đều được gán ROLE_STUDENT
-      router.push(ROUTE_MAP.studentDashboard);
+      router.push(payload.role === ROLE_ADMIN ? ROUTE_MAP.adminDashboard : ROUTE_MAP.studentDashboard);
     } catch {
-      toast.error("Đã xảy ra lỗi trong quá trình xử lý đăng nhập.");
+      toast.error("Unable to complete sign-in.");
     }
   };
 
-  // Hàm xử lý và giải mã Credential của Google (dùng chung cho cả One Tap và Button)
+  // Decode and process Google credentials from One Tap and the button.
   const handleGoogleCredential = async (credential?: string) => {
     if (!credential) {
-      toast.error("Không nhận được thông tin xác thực từ Google.");
+      toast.error("Google did not return a credential.");
       return;
     }
 
@@ -54,38 +52,25 @@ export default function HomePage() {
       const decoded = jwtDecode<GoogleUserPayload>(credential);
       
       if (!decoded.email) {
-        toast.error("Không thể lấy email từ tài khoản Google.");
+        toast.error("Unable to read the email from your Google account.");
         setLoading(false);
         return;
       }
 
-      let studentId = "";
-      let className = "";
+      const roleRes = await fetch("/api/auth/google-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: decoded.email }),
+      });
+      const roleJson = await roleRes.json();
 
-      // 1. Kiểm tra email trên whitelist AllowedEmails của Supabase
-      try {
-        const { data: whitelistData, error: whitelistError } = await supabase
-          .rpc("check_email_whitelist", { email_to_check: decoded.email.toLowerCase().trim() })
-          .maybeSingle<{ student_id: string; class_name: string }>();
-
-        if (whitelistError) {
-          console.error("Lỗi truy vấn whitelist Supabase:", whitelistError);
-          toast.error("Không thể xác thực quyền truy cập. Vui lòng thử lại sau.");
-          setLoading(false);
-          return;
-        }
-
-        if (!whitelistData) {
-          toast.error("Email của bạn không nằm trong danh sách được cấp phép truy cập.");
-          setLoading(false);
-          return;
-        }
-
-        studentId = whitelistData.student_id;
-        className = whitelistData.class_name;
-      } catch (dbErr) {
-        console.error("Lỗi kết nối Supabase:", dbErr);
-        toast.error("Lỗi kết nối cơ sở dữ liệu. Vui lòng thử lại sau.");
+      if (!roleRes.ok || !roleJson.success) {
+        console.error("Access validation failed:", roleJson.error);
+        toast.error(
+          roleRes.status === 403
+            ? "Your email is not allowed to access this system."
+            : "Unable to validate access. Please try again."
+        );
         setLoading(false);
         return;
       }
@@ -94,25 +79,25 @@ export default function HomePage() {
         email: decoded.email,
         name: decoded.name || decoded.email.split("@")[0],
         picture: decoded.picture,
-        role: ROLE_STUDENT,
-        studentId: studentId || undefined,
-        className: className || undefined,
+        role: roleJson.data.role,
+        studentId: roleJson.data.studentId || undefined,
+        className: roleJson.data.className || undefined,
       });
     } catch (err) {
-      console.error("Lỗi giải mã token Google:", err);
-      toast.error("Đã xảy ra lỗi khi đọc thông tin từ Google.");
+      console.error("Failed to decode Google token:", err);
+      toast.error("Unable to read your Google profile.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Kích hoạt Google One Tap khi render trang chủ
+  // Enable Google One Tap on the sign-in page.
   useGoogleOneTapLogin({
     onSuccess: (credentialResponse) => {
       handleGoogleCredential(credentialResponse.credential);
     },
     onError: () => {
-      console.warn("Google One Tap: Không thể tự động hiển thị hoặc bị người dùng đóng.");
+      console.warn("Google One Tap could not be shown or was dismissed.");
     },
   });
 
@@ -127,19 +112,19 @@ export default function HomePage() {
             PRN232 Auto Grading
           </h1>
           <p className="mt-2 text-sm text-muted-foreground font-sans">
-            Hệ thống chấm điểm và chẩn đoán bài tập Lab PRN232 (.NET/C#)
+            PRN232 (.NET/C#) lab grading and diagnostics portal
           </p>
         </div>
 
         <Card className="border-border bg-card shadow-sm">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-xl text-center">Đăng nhập</CardTitle>
+            <CardTitle className="text-xl text-center">Sign In</CardTitle>
             <CardDescription className="text-center">
-              Sử dụng tài khoản Google để truy cập bảng điểm
+              Use your Google account to access your dashboard
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center justify-center p-6">
-            {/* Nút đăng nhập bằng Google mặc định từ thư viện */}
+            {/* Default Google sign-in button from the library */}
             <div className="w-full flex justify-center py-2 relative">
               {loading && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center bg-card/50">
@@ -151,7 +136,7 @@ export default function HomePage() {
                   handleGoogleCredential(credentialResponse.credential);
                 }}
                 onError={() => {
-                  toast.error("Đăng nhập bằng Google thất bại.");
+                  toast.error("Google sign-in failed.");
                 }}
                 useOneTap
                 theme="outline"
@@ -163,7 +148,7 @@ export default function HomePage() {
         </Card>
 
         <div className="text-center text-xs text-muted-foreground font-sans">
-          <p>© 2026 PRN232 Grading System. Phát triển cho mục đích giáo dục.</p>
+          <p>© 2026 PRN232 Grading System. Built for educational use.</p>
           <a
             href="https://github.com"
             target="_blank"

@@ -1,6 +1,6 @@
 import Cookies from "js-cookie";
 
-// Mã hóa chuỗi sang Base64Url tương thích với JWT-decode
+// Encode a string as Base64Url so jwt-decode can read it.
 function base64UrlEncode(str: string): string {
   const base64 = btoa(
     encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => {
@@ -21,12 +21,12 @@ export interface UserPayload {
 }
 
 /**
- * Tạo token JWT giả lập cho việc xác thực cục bộ
+ * Create a mock JWT for local authentication.
  */
 export function generateMockJWT(user: Omit<UserPayload, "exp">): string {
   const header = { alg: "HS256", typ: "JWT" };
   
-  // Token hết hạn sau 7 ngày (UNIX timestamp bằng giây)
+  // Token expires after 7 days (UNIX timestamp in seconds).
   const exp = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
   
   const payload: UserPayload = {
@@ -42,14 +42,14 @@ export function generateMockJWT(user: Omit<UserPayload, "exp">): string {
 }
 
 /**
- * Lưu authToken vào Cookie để Middleware và Client đọc
+ * Store authToken in a cookie for middleware and client code.
  */
 export function setAuthCookie(token: string) {
   Cookies.set("authToken", token, { expires: 7, path: "/" });
 }
 
 /**
- * Xóa authToken khỏi Cookie khi đăng xuất
+ * Remove authToken from cookies on sign-out.
  */
 export function removeAuthCookie() {
   Cookies.remove("authToken", { path: "/" });

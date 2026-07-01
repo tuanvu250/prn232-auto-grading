@@ -42,7 +42,7 @@ export async function GET() {
     }
 
     return NextResponse.json({ success: true, data });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error fetching grades from Supabase:", err);
     return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
   }

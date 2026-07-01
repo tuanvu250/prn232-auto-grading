@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Cookies from "js-cookie";
@@ -14,14 +16,54 @@ import {
   ChevronRight,
   User as UserIcon,
   ArrowUp,
+  ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 import { LabAssignment, SubmissionHistory, TestcaseResult } from "@/lib/api/studentData";
+
+interface ResubmissionRequest {
+  id: string;
+  lab_id: string;
+  drive_link: string;
+  note?: string | null;
+  status: "pending" | "completed";
+  updated_at: string;
+  completed_at?: string | null;
+}
+
+interface DbTestcase {
+  name?: string;
+  passed?: boolean;
+  error?: string;
+  score?: number;
+  max_score?: number;
+  actual_response?: string | null;
+  actual_status_code?: number | null;
+}
+
+interface DbSubmission {
+  lab_id: string;
+  score?: number | string | null;
+  status?: string | null;
+  updated_at: string;
+  details?: {
+    tests?: DbTestcase[];
+    passed?: number;
+    total?: number;
+    build_logs?: string;
+    buildLogs?: string;
+    log?: string;
+  } | null;
+}
 
 const formatDate = (dateStr: string) => {
   try {
@@ -93,18 +135,23 @@ export default function StudentDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserPayload | null>(null);
 
-  // Danh sách các bài lab (lấy thực tế từ Supabase)
+  // Lab list loaded from Supabase.
   const [labs, setLabs] = useState<LabAssignment[]>([]);
 
-  // Bài lab đang được chọn
+  // Currently selected lab.
   const [selectedLab, setSelectedLab] = useState<LabAssignment | null>(null);
 
-  // Phiên bản nộp bài đang được chọn trong bài lab đó
+  // Currently selected submission version for the selected lab.
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionHistory | null>(null);
   const [loadingGrades, setLoadingGrades] = useState(true);
+  const [resubmissions, setResubmissions] = useState<ResubmissionRequest[]>([]);
+  const [loadingResubmissions, setLoadingResubmissions] = useState(false);
+  const [savingResubmission, setSavingResubmission] = useState(false);
+  const [driveLink, setDriveLink] = useState("");
+  const [resubmitNote, setResubmitNote] = useState("");
   const [showScrollTop, setShowScrollTop] = useState(false);
 
-  // Lắng nghe sự kiện scroll để ẩn/hiện nút cuộn lên đầu trang
+  // Toggle the scroll-to-top button while scrolling.
   useEffect(() => {
     const handleScroll = () => {
       if (window.scrollY > 300) {
@@ -124,7 +171,7 @@ export default function StudentDashboardPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Đảm bảo đồng bộ và xác thực người dùng
+  // Sync and validate the current user.
   useEffect(() => {
     const token = Cookies.get("authToken");
     if (!token) {
@@ -135,13 +182,13 @@ export default function StudentDashboardPage() {
       const decoded = jwtDecode<UserPayload>(token);
       setUser(decoded);
     } catch {
-      toast.error("Phiên đăng nhập không hợp lệ, vui lòng đăng nhập lại.");
+      toast.error("Invalid session. Please sign in again.");
       removeAuthCookie();
       router.push("/");
     }
   }, [router]);
 
-  // Cập nhật selectedLab từ danh sách labs mới khi labs được cập nhật
+  // Keep selectedLab in sync when labs are refreshed.
   useEffect(() => {
     if (labs.length > 0) {
       const curSelected = selectedLab ? labs.find((l) => l.id === selectedLab.id) : null;
@@ -151,62 +198,29 @@ export default function StudentDashboardPage() {
     }
   }, [labs]);
 
-  // Cập nhật submission khi đổi bài lab hoặc khi selectedLab thay đổi
+  // Update the selected submission when the selected lab changes.
   useEffect(() => {
     if (selectedLab && selectedLab.submissions.length > 0) {
-      setSelectedSubmission(selectedLab.submissions[0]); // Mặc định chọn lần nộp gần nhất (version cao nhất)
+      setSelectedSubmission(selectedLab.submissions[0]); // Default to the latest submission.
     } else {
       setSelectedSubmission(null);
     }
   }, [selectedLab]);
 
-  // Fetch kết quả điểm từ API Route để đảm bảo bảo mật và bypass RLS qua Service Role
   useEffect(() => {
-    if (!user || !user.studentId) return;
+    const currentRequest = selectedLab
+      ? resubmissions.find((request) => request.lab_id === selectedLab.id)
+      : null;
 
-    const fetchGrades = async () => {
-      setLoadingGrades(true);
-      try {
-        const res = await fetch("/api/grades");
-        const json = await res.json();
-        if (json.success) {
-          mergeSubmissions(json.data || []);
-        } else {
-          console.error("Lỗi khi tải điểm số từ API:", json.error);
-          toast.error("Không thể tải điểm số từ hệ thống.");
-          mergeSubmissions([]);
-        }
-      } catch (err) {
-        console.error("Lỗi kết nối API:", err);
-        toast.error("Đã xảy ra lỗi khi kết nối máy chủ.");
-        mergeSubmissions([]);
-      } finally {
-        setLoadingGrades(false);
-      }
-    };
+    setDriveLink(currentRequest?.drive_link || "");
+    setResubmitNote(currentRequest?.note || "");
+  }, [selectedLab, resubmissions]);
 
-    fetchGrades();
-  }, [user]);
-
-  // Sắp xếp các testcase: SOURCE lên đầu, sau đó đến các API methods
-  const getSortedTestcases = (submission: SubmissionHistory) => {
-    return [...submission.testcaseDetails].sort((a, b) => {
-      const { method: methodA } = parseTestcase(a.name);
-      const { method: methodB } = parseTestcase(b.name);
-      const isSourceA = methodA === "SOURCE";
-      const isSourceB = methodB === "SOURCE";
-      
-      if (isSourceA && !isSourceB) return -1;
-      if (!isSourceA && isSourceB) return 1;
-      return 0;
-    });
-  };
-
-  const mergeSubmissions = (dbSubmissions: any[]) => {
+  function mergeSubmissions(dbSubmissions: DbSubmission[]) {
     const updatedLabs: LabAssignment[] = dbSubmissions.map((sub) => {
       const details = sub.details || {};
       const tests = details.tests || [];
-      const testcaseDetails: TestcaseResult[] = tests.map((t: any) => ({
+      const testcaseDetails: TestcaseResult[] = tests.map((t) => ({
         name: t.name || "Testcase",
         status: t.passed ? "pass" : "fail",
         message: t.error || undefined,
@@ -226,7 +240,7 @@ export default function StudentDashboardPage() {
         version: 1,
         submittedAt: formatDate(sub.updated_at),
         score: Number(sub.score) || 0,
-        status: mapStatus(sub.status, Number(sub.score) || 0),
+        status: mapStatus(sub.status || "", Number(sub.score) || 0),
         testcasesPassed: Number(details.passed) || testcaseDetails.filter(t => t.status === "pass").length,
         testcasesTotal: Number(details.total) || testcaseDetails.length,
         buildLogs,
@@ -236,7 +250,7 @@ export default function StudentDashboardPage() {
       return {
         id: sub.lab_id,
         title: sub.lab_id,
-        description: "Chi tiết chấm điểm tự động từ hệ thống.",
+        description: "Automated grading details from the system.",
         dueDate: "N/A",
         weight: 0,
         status: mappedSubmission.status,
@@ -245,14 +259,79 @@ export default function StudentDashboardPage() {
       };
     });
 
-    // Sắp xếp theo tên bài lab
+    // Sort by lab name.
     updatedLabs.sort((a, b) => a.title.localeCompare(b.title));
     setLabs(updatedLabs);
+  }
+
+  // Fetch grades through the API route to keep server-side authorization in place.
+  useEffect(() => {
+    if (!user || !user.studentId) return;
+
+    const fetchGrades = async () => {
+      setLoadingGrades(true);
+      try {
+        const res = await fetch("/api/grades");
+        const json = await res.json();
+        if (json.success) {
+          mergeSubmissions(json.data || []);
+        } else {
+          console.error("Failed to load grades:", json.error);
+          toast.error("Unable to load grades.");
+          mergeSubmissions([]);
+        }
+      } catch (err) {
+        console.error("Grades API connection failed:", err);
+        toast.error("Unable to reach the server.");
+        mergeSubmissions([]);
+      } finally {
+        setLoadingGrades(false);
+      }
+    };
+
+    fetchGrades();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !user.studentId) return;
+
+    const fetchResubmissions = async () => {
+      setLoadingResubmissions(true);
+      try {
+        const res = await fetch("/api/resubmissions");
+        const json = await res.json();
+        if (json.success) {
+          setResubmissions(json.data || []);
+        } else {
+          console.error("Failed to load resubmission requests:", json.error);
+        }
+      } catch (err) {
+        console.error("Resubmissions API connection failed:", err);
+      } finally {
+        setLoadingResubmissions(false);
+      }
+    };
+
+    fetchResubmissions();
+  }, [user]);
+
+  // Sort test cases: SOURCE first, then API methods.
+  const getSortedTestcases = (submission: SubmissionHistory) => {
+    return [...submission.testcaseDetails].sort((a, b) => {
+      const { method: methodA } = parseTestcase(a.name);
+      const { method: methodB } = parseTestcase(b.name);
+      const isSourceA = methodA === "SOURCE";
+      const isSourceB = methodB === "SOURCE";
+      
+      if (isSourceA && !isSourceB) return -1;
+      if (!isSourceA && isSourceB) return 1;
+      return 0;
+    });
   };
 
   const handleLogout = () => {
     removeAuthCookie();
-    toast.success("Đã đăng xuất khỏi hệ thống.");
+    toast.success("Signed out.");
     router.push("/login");
   };
 
@@ -265,7 +344,7 @@ export default function StudentDashboardPage() {
       case "Grading":
         return <Badge className="bg-amber-500 hover:bg-amber-600 text-white border-none animate-pulse">Grading</Badge>;
       default:
-        return <Badge variant="outline">Chưa nộp</Badge>;
+        return <Badge variant="outline">Not Submitted</Badge>;
     }
   };
 
@@ -276,12 +355,119 @@ export default function StudentDashboardPage() {
     }
   };
 
+  const getSelectedResubmission = () => {
+    if (!selectedLab) return null;
+    return resubmissions.find((request) => request.lab_id === selectedLab.id) || null;
+  };
+
+  const handleSaveResubmission = async () => {
+    if (!selectedLab) return;
+
+    setSavingResubmission(true);
+    try {
+      const res = await fetch("/api/resubmissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          labId: selectedLab.id,
+          driveLink,
+          note: resubmitNote,
+        }),
+      });
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        toast.error(json.error || "Unable to submit the resubmission request.");
+        return;
+      }
+
+      setResubmissions((prev) => {
+        const others = prev.filter((request) => request.id !== json.data.id);
+        return [json.data, ...others];
+      });
+      toast.success("Resubmission request sent. Admins will receive a Discord notification.");
+    } catch (err) {
+      console.error("Failed to save resubmission request:", err);
+      toast.error("Unable to reach the server.");
+    } finally {
+      setSavingResubmission(false);
+    }
+  };
+
+  const renderMainPanelSkeleton = () => {
+    return (
+      <Card className="border-border bg-card shadow-sm h-full flex flex-col">
+        <CardContent className="min-w-0 flex-1 p-3 sm:p-6 space-y-6 animate-pulse">
+          {/* Page Header Skeleton */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-6">
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-7 w-48 sm:h-8" />
+              <div className="flex gap-2 flex-wrap">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+            </div>
+          </div>
+
+          {/* Stats Cards Skeleton */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, idx) => (
+              <div key={idx} className="rounded-lg border border-border bg-card p-3 space-y-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-6 w-12" />
+              </div>
+            ))}
+          </div>
+
+          {/* Table Skeleton */}
+          <div className="space-y-3">
+            <Skeleton className="h-5 w-32" />
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="bg-muted/40 p-3 flex justify-between">
+                <Skeleton className="h-4 w-1/4" />
+                <Skeleton className="h-4 w-1/12" />
+                <Skeleton className="h-4 w-1/12" />
+                <Skeleton className="h-4 w-1/12" />
+              </div>
+              <div className="divide-y divide-border">
+                {Array.from({ length: 3 }).map((_, idx) => (
+                  <div key={idx} className="p-3 flex justify-between">
+                    <Skeleton className="h-4 w-2/5" />
+                    <Skeleton className="h-4 w-1/12" />
+                    <Skeleton className="h-4 w-1/12" />
+                    <Skeleton className="h-4 w-1/12" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   const renderLabList = () => {
     if (loadingGrades) {
       return (
-        <div className="flex flex-col items-center justify-center p-12 border rounded-lg bg-card text-muted-foreground gap-2">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-          <p className="text-xs">Đang tải điểm số...</p>
+        <div className="space-y-2 animate-pulse">
+          {Array.from({ length: 3 }).map((_, idx) => (
+            <div key={idx} className="border border-border bg-card rounded-lg p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1.5 flex-1">
+                  <Skeleton className="h-4 w-4/5" />
+                  <Skeleton className="h-3 w-1/3" />
+                </div>
+                <div className="space-y-1.5 items-end flex flex-col">
+                  <Skeleton className="h-4 w-12" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+              </div>
+              <div className="flex justify-between items-center pt-1">
+                <Skeleton className="h-3 w-16" />
+              </div>
+            </div>
+          ))}
         </div>
       );
     }
@@ -289,21 +475,24 @@ export default function StudentDashboardPage() {
     if (labs.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center p-12 border border-dashed rounded-lg bg-card text-muted-foreground text-center gap-2">
-          <p className="text-sm font-medium">Chưa có kết quả bài nộp nào</p>
-          <p className="text-xs text-muted-foreground">Sẵn sàng nhận điểm! Hãy nộp bài làm của bạn, hệ thống sẽ chấm điểm tự động và cập nhật kết quả tại đây ngay lập tức.</p>
+          <p className="text-sm font-medium">No graded submissions yet</p>
+          <p className="text-xs text-muted-foreground">Submit your work through the grading system and results will appear here.</p>
         </div>
       );
     }
 
     return (
       <div className="space-y-2">
-        {labs.map((lab) => {
+        {labs.map((lab, index) => {
           const isSelected = selectedLab?.id === lab.id;
           return (
             <button
               key={lab.id}
               onClick={() => handleSelectLab(lab)}
+              style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
               className={`w-full text-left rounded-lg border p-4 transition-all duration-200 ${
+                "motion-list-item "
+              }${
                 isSelected
                   ? "border-primary bg-primary/[0.02] shadow-sm"
                   : "border-border bg-card hover:bg-muted/50"
@@ -316,7 +505,7 @@ export default function StudentDashboardPage() {
                   </h3>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Calendar className="h-3 w-3" />
-                    <span>Hạn nộp: {lab.dueDate}</span>
+                    <span>Due: {lab.dueDate}</span>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -328,13 +517,13 @@ export default function StudentDashboardPage() {
               </div>
               <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
                 {lab.weight > 0 ? (
-                  <span>Trọng số: {lab.weight}%</span>
+                  <span>Weight: {lab.weight}%</span>
                 ) : (
                   <span></span>
                 )}
                 {isSelected && (
                   <span className="flex items-center gap-0.5 text-primary font-medium">
-                    Đang xem <ChevronRight className="h-3 w-3" />
+                    Viewing <ChevronRight className="h-3 w-3" />
                   </span>
                 )}
               </div>
@@ -348,10 +537,23 @@ export default function StudentDashboardPage() {
   const renderLabSlider = () => {
     if (loadingGrades) {
       return (
-        <div className="rounded-lg border bg-card p-4 text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-            <span className="text-sm">Đang tải điểm số...</span>
+        <div className="-mx-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:-mx-6 sm:px-6 [&::-webkit-scrollbar]:hidden">
+          <div className="flex snap-x snap-mandatory gap-3 animate-pulse">
+            {Array.from({ length: 2 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="min-h-[116px] w-[78vw] max-w-[320px] shrink-0 snap-start rounded-lg border border-border bg-card p-4 text-left sm:w-[300px] flex flex-col justify-between gap-3"
+              >
+                <div className="space-y-1.5 flex-1">
+                  <Skeleton className="h-4 w-4/5" />
+                  <Skeleton className="h-3 w-1/3" />
+                </div>
+                <div className="flex justify-between items-center">
+                  <Skeleton className="h-5 w-14" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       );
@@ -360,8 +562,8 @@ export default function StudentDashboardPage() {
     if (labs.length === 0) {
       return (
         <div className="rounded-lg border border-dashed bg-card p-4 text-muted-foreground">
-          <p className="text-sm font-medium">Chưa có kết quả bài nộp nào</p>
-          <p className="mt-1 text-xs">Kết quả sẽ xuất hiện tại đây sau khi hệ thống chấm bài.</p>
+          <p className="text-sm font-medium">No graded submissions yet</p>
+          <p className="mt-1 text-xs">Results will appear here after grading is complete.</p>
         </div>
       );
     }
@@ -369,13 +571,16 @@ export default function StudentDashboardPage() {
     return (
       <div className="-mx-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:-mx-6 sm:px-6 [&::-webkit-scrollbar]:hidden">
         <div className="flex snap-x snap-mandatory gap-3">
-          {labs.map((lab) => {
+          {labs.map((lab, index) => {
             const isSelected = selectedLab?.id === lab.id;
             return (
               <button
                 key={lab.id}
                 onClick={() => handleSelectLab(lab, true)}
+                style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
                 className={`min-h-[116px] w-[78vw] max-w-[320px] shrink-0 snap-start rounded-lg border p-4 text-left transition-all duration-200 sm:w-[300px] ${
+                  "motion-list-item "
+                }${
                   isSelected
                     ? "border-primary bg-primary/[0.03]"
                     : "border-border bg-card"
@@ -389,13 +594,13 @@ export default function StudentDashboardPage() {
                       </h3>
                       {isSelected && (
                         <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                          Đang xem
+                          Viewing
                         </span>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Calendar className="h-3 w-3 shrink-0" />
-                      <span className="truncate">Hạn nộp: {lab.dueDate}</span>
+                      <span className="truncate">Due: {lab.dueDate}</span>
                     </div>
                   </div>
 
@@ -419,7 +624,7 @@ export default function StudentDashboardPage() {
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-2">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-          <p className="text-sm text-muted-foreground">Đang tải dữ liệu...</p>
+          <p className="text-sm text-muted-foreground">Loading data...</p>
         </div>
       </div>
     );
@@ -462,7 +667,7 @@ export default function StudentDashboardPage() {
                 </p>
               </div>
               <Badge variant="outline" className="hidden text-[10px] sm:inline-block border-primary/20 bg-primary/5 text-primary">
-                Sinh viên
+                Student
               </Badge>
             </div>
 
@@ -473,7 +678,7 @@ export default function StudentDashboardPage() {
                 size="icon"
                 className="h-9 w-9 text-muted-foreground hover:text-destructive"
                 onClick={handleLogout}
-                title="Đăng xuất"
+                title="Sign out"
               >
                 <LogOut className="h-4 w-4" />
               </Button>
@@ -487,15 +692,15 @@ export default function StudentDashboardPage() {
         <div className="min-w-0 space-y-3 lg:hidden">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-base font-bold tracking-tight">Bài tập Lab</h2>
+              <h2 className="text-base font-bold tracking-tight">Lab Assignments</h2>
               {selectedLab && !loadingGrades && (
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  Đang xem: {selectedLab.title}
+                  Viewing: {selectedLab.title}
                 </p>
               )}
             </div>
             <span className="shrink-0 text-xs text-muted-foreground">
-              Tổng số: {labs.length}
+              Total: {labs.length}
             </span>
           </div>
           {renderLabSlider()}
@@ -504,9 +709,9 @@ export default function StudentDashboardPage() {
         {/* Left Side: Lab Assignment List (Sticky & Smaller sidebar: lg:col-span-3) */}
         <section className="hidden space-y-4 lg:col-span-3 lg:sticky lg:top-20 lg:block lg:self-start lg:max-h-[calc(100vh-6rem)] overflow-y-auto pr-1 w-full min-w-0">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold tracking-tight">Bài tập Lab</h2>
+            <h2 className="text-lg font-bold tracking-tight">Lab Assignments</h2>
             <span className="text-xs text-muted-foreground font-sans">
-              Tổng số: {labs.length}
+              Total: {labs.length}
             </span>
           </div>
 
@@ -515,7 +720,9 @@ export default function StudentDashboardPage() {
 
         {/* Right Side: Diagnostic Console & Detail (Main content: lg:col-span-9) */}
         <section className="space-y-4 lg:col-span-9 w-full min-w-0">
-          {selectedLab ? (
+          {loadingGrades ? (
+            renderMainPanelSkeleton()
+          ) : selectedLab ? (
             <Card className="border-border bg-card shadow-sm h-full flex flex-col">
               <CardContent className="min-w-0 flex-1 p-3 sm:p-6 space-y-6">
                 {/* Submission Information Panel */}
@@ -526,12 +733,12 @@ export default function StudentDashboardPage() {
                         {user.studentId || "Student ID"}
                       </h3>
                       <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-                        <span>Trạng thái: <span className="font-semibold text-foreground">{selectedSubmission.status}</span></span>
+                        <span>Status: <span className="font-semibold text-foreground">{selectedSubmission.status}</span></span>
                         <span>•</span>
-                        <span>Tổng điểm: <span className="font-extrabold text-foreground">{selectedSubmission.score.toFixed(2)} / 10</span></span>
+                        <span>Total score: <span className="font-extrabold text-foreground">{selectedSubmission.score.toFixed(2)} / 10</span></span>
                         <span>•</span>
                         <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" /> Lúc {selectedSubmission.submittedAt}
+                          <Clock className="h-3 w-3" /> At {selectedSubmission.submittedAt}
                         </span>
                       </div>
                     </div>
@@ -539,7 +746,7 @@ export default function StudentDashboardPage() {
                     {/* Version selection dropdown */}
                     {selectedLab.submissions.length > 1 && (
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs text-muted-foreground font-medium">Phiên bản nộp:</span>
+                        <span className="text-xs text-muted-foreground font-medium">Submission version:</span>
                         <select
                           value={selectedSubmission.version}
                           onChange={(e) => {
@@ -560,12 +767,89 @@ export default function StudentDashboardPage() {
                   </div>
                 ) : (
                   <div className="rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground font-sans">
-                    Chưa nộp bài tập này. Vui lòng nộp code qua hệ thống chấm để nhận kết quả.
+                    This assignment has not been submitted yet. Submit your code through the grading system to receive results.
                   </div>
                 )}
 
                 {selectedSubmission && (
                   <div className="space-y-6">
+                    {(() => {
+                      const request = getSelectedResubmission();
+                      const isCompleted = request?.status === "completed";
+                      const canSubmit = driveLink.trim().length > 0 && !isCompleted && !savingResubmission;
+
+                      return (
+                        <div className="motion-panel rounded-lg border border-border bg-muted/20 p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-bold text-foreground">Resubmission Request</h3>
+                                {request ? (
+                                  <Badge
+                                    className={
+                                      request.status === "pending"
+                                        ? "border-none bg-amber-500 text-white hover:bg-amber-600"
+                                        : "border-none bg-emerald-500 text-white hover:bg-emerald-600"
+                                    }
+                                  >
+                                    {request.status === "pending" ? "Pending" : "Completed"}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Submit a Google Drive link for the selected lab. You can update the link while the request is pending.
+                              </p>
+                            </div>
+                            {request?.drive_link ? (
+                              <Button variant="outline" size="sm" asChild className="shrink-0">
+                                <a href={request.drive_link} target="_blank" rel="noreferrer">
+                                  <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                                  Open Link
+                                </a>
+                              </Button>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-4 grid gap-3">
+                            <Input
+                              value={driveLink}
+                              onChange={(event) => setDriveLink(event.target.value)}
+                              placeholder="https://drive.google.com/..."
+                              disabled={isCompleted}
+                              aria-label="Google Drive resubmission link"
+                            />
+                            <Textarea
+                              value={resubmitNote}
+                              onChange={(event) => setResubmitNote(event.target.value)}
+                              placeholder="Optional note for admin"
+                              disabled={isCompleted}
+                              className="min-h-[72px]"
+                              aria-label="Resubmission note"
+                            />
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <p className="text-xs text-muted-foreground">
+                                {loadingResubmissions
+                                  ? "Loading request status..."
+                                  : request
+                                    ? `Last updated: ${formatDate(request.updated_at)}`
+                                    : "No resubmission request for this lab yet."}
+                              </p>
+                              <Button
+                                onClick={handleSaveResubmission}
+                                disabled={!canSubmit}
+                                className="sm:w-auto"
+                              >
+                                {savingResubmission ? (
+                                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                                ) : null}
+                                {request ? "Update Link" : "Submit Request"}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Testcases list Table */}
                     <div className="border border-border rounded-lg overflow-hidden overflow-x-auto bg-card w-full">
                       <Table className="max-lg:min-w-[680px]">
@@ -661,8 +945,8 @@ export default function StudentDashboardPage() {
             <Card className="border-border bg-card shadow-sm h-full flex items-center justify-center p-8 text-center text-muted-foreground font-sans">
               <div className="flex flex-col items-center gap-2 max-w-md">
                 <Code2 className="h-8 w-8 text-muted-foreground/60" />
-                <h3 className="font-bold text-foreground mt-2">Chưa có kết quả bài nộp nào</h3>
-                <p className="text-sm">Hiện tại bạn chưa nộp bài tập nào lên hệ thống chấm điểm tự động.</p>
+                <h3 className="font-bold text-foreground mt-2">No graded submissions yet</h3>
+                <p className="text-sm">You have not submitted any assignments to the automated grading system yet.</p>
               </div>
             </Card>
           )}
@@ -675,7 +959,7 @@ export default function StudentDashboardPage() {
           onClick={scrollToTop}
           className="fixed bottom-6 right-6 z-50 h-10 w-10 rounded-full shadow-lg bg-orange-500 hover:bg-orange-600 text-white transition-all duration-300 p-0 flex items-center justify-center animate-in fade-in slide-in-from-bottom-4"
           size="icon"
-          title="Cuộn lên đầu trang"
+          title="Scroll to top"
         >
           <ArrowUp className="h-5 w-5" />
         </Button>
