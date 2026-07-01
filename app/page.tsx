@@ -1,27 +1,172 @@
 "use client";
 
-import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { GoogleLogin, useGoogleOneTapLogin } from "@react-oauth/google";
+import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { GraduationCap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { generateMockJWT, setAuthCookie } from "@/lib/utils/auth";
+import { ROLE_ADMIN, ROUTE_MAP } from "@/lib/types/roles";
+import { googleLoginAction } from "@/lib/actions/auth";
+
+interface GoogleUserPayload {
+  email: string;
+  name: string;
+  picture?: string;
+}
 
 export default function HomePage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  // Handle a successful sign-in.
+  const handleLoginSuccess = (payload: {
+    email: string;
+    name: string;
+    picture?: string;
+    role: string;
+    studentId?: string;
+    className?: string;
+  }) => {
+    try {
+      const token = generateMockJWT(payload);
+      setAuthCookie(token);
+      toast.success("Signed in with Google.");
+      
+      router.push(payload.role === ROLE_ADMIN ? ROUTE_MAP.adminDashboard : ROUTE_MAP.studentDashboard);
+    } catch {
+      toast.error("Unable to complete sign-in.");
+    }
+  };
+
+  // Decode and process Google credentials from One Tap and the button.
+  const handleGoogleCredential = async (credential?: string) => {
+    if (!credential) {
+      toast.error("Google did not return a credential.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const decoded = jwtDecode<GoogleUserPayload>(credential);
+      
+      if (!decoded.email) {
+        toast.error("Unable to read the email from your Google account.");
+        setLoading(false);
+        return;
+      }
+
+      const roleJson = await googleLoginAction(decoded.email);
+
+      if (!roleJson.success || !roleJson.data) {
+        console.error("Access validation failed:", !roleJson.success ? roleJson.error : "No data returned");
+        toast.error(
+          !roleJson.success && roleJson.error === "Email is not allowed"
+            ? "Your email is not allowed to access this system."
+            : "Unable to validate access. Please try again."
+        );
+        setLoading(false);
+        return;
+      }
+
+      handleLoginSuccess({
+        email: decoded.email,
+        name: decoded.name || decoded.email.split("@")[0],
+        picture: decoded.picture,
+        role: roleJson.data.role,
+        studentId: roleJson.data.studentId || undefined,
+        className: roleJson.data.className || undefined,
+      });
+    } catch (err) {
+      console.error("Failed to decode Google token:", err);
+      toast.error("Unable to read your Google profile.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Enable Google One Tap on the sign-in page.
+  useGoogleOneTapLogin({
+    onSuccess: (credentialResponse) => {
+      handleGoogleCredential(credentialResponse.credential);
+    },
+    onError: () => {
+      console.warn("Google One Tap could not be shown or was dismissed.");
+    },
+  });
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <CardTitle>PRN232 Auto Grading</CardTitle>
-          <CardDescription>
-            Frontend foundation — Tailwind v4, Redux, React Query, shadcn UI
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <Button onClick={() => toast.success("Setup hoàn tất!")}>Test toast</Button>
-          <Button variant="outline" asChild>
-            <Link href="/login">Đăng nhập</Link>
-          </Button>
-        </CardContent>
-      </Card>
+    <main className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12 transition-colors duration-200">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <GraduationCap className="h-8 w-8" />
+          </div>
+          <h1 className="mt-4 font-sans text-3xl font-bold tracking-tight text-foreground">
+            PRN232 Auto Grading
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground font-sans">
+            PRN232 (.NET/C#) lab grading and diagnostics portal
+          </p>
+        </div>
+
+        <Card className="border-border bg-card shadow-sm">
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-xl text-center">Sign In</CardTitle>
+            <CardDescription className="text-center">
+              Use your Google account to access your dashboard
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center p-6">
+            {/* Default Google sign-in button from the library */}
+            <div className="w-full flex justify-center py-2 relative">
+              {loading && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-card/50">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+                </div>
+              )}
+              <GoogleLogin
+                onSuccess={(credentialResponse) => {
+                  handleGoogleCredential(credentialResponse.credential);
+                }}
+                onError={() => {
+                  toast.error("Google sign-in failed.");
+                }}
+                useOneTap
+                theme="outline"
+                size="large"
+                width="320"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="text-center text-xs text-muted-foreground font-sans">
+          <p>© 2026 PRN232 Grading System. Built for educational use.</p>
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 mt-2 hover:text-foreground"
+          >
+            <svg
+              className="h-3 w-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+              <path d="M9 18c-4.51 2-5-2-7-2" />
+            </svg>
+            GitHub Repository
+          </a>
+        </div>
+      </div>
     </main>
   );
 }

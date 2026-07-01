@@ -1,7 +1,8 @@
 "use client";
 
 import { ReactNode } from "react";
-import { ThemeProvider } from "next-themes";
+
+import { GoogleOAuthProvider } from "@react-oauth/google";
 import { ReduxProvider } from "./reduxProvider";
 import { QueryProvider } from "./queryProvider";
 import { useAuthSyncAcrossTabs } from "@/hooks/useAuthSyncAcrossTabs";
@@ -12,22 +13,21 @@ function AuthSyncProvider({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <ReduxProvider>
       <QueryProvider>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
+        <GoogleOAuthProvider clientId={googleClientId}>
           <AuthSyncProvider>
             {children}
             <Toaster position="bottom-center" richColors closeButton />
           </AuthSyncProvider>
-        </ThemeProvider>
+        </GoogleOAuthProvider>
       </QueryProvider>
     </ReduxProvider>
   );
 }
+
+

@@ -2,21 +2,21 @@
 
 @layer base {
   :root {
-    --brand-pink: #f4449b;
-    --brand-magenta: #ad1c9a;
-    --brand-purple: #67178d;
-    --brand-dark: #0a000e;
+    --brand-pink: #f97316;
+    --brand-magenta: #ea580c;
+    --brand-purple: #c2410c;
+    --brand-dark: #0c0a09;
 
     --background: #ffffff;
-    --foreground: #0a000e;
+    --foreground: #0c0a09;
 
-    --primary: #ad1c9a;
+    --primary: #ea580c;
     --primary-foreground: #ffffff;
 
-    --secondary: #67178d;
+    --secondary: #c2410c;
     --secondary-foreground: #ffffff;
 
-    --accent: #f4449b;
+    --accent: #f59e0b;
     --accent-foreground: #ffffff;
 
     --muted: #f3f4f6;
@@ -27,28 +27,32 @@
 
     --border: #e5e7eb;
     --input: #e5e7eb;
-    --ring: #ad1c9a;
+    --ring: #ea580c;
 
     --card: #ffffff;
-    --card-foreground: #0a000e;
+    --card-foreground: #0c0a09;
 
     --popover: #ffffff;
-    --popover-foreground: #0a000e;
+    --popover-foreground: #0c0a09;
 
     --radius: 0.5rem;
+
+    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+    --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .dark {
-    --background: #0a000e;
-    --foreground: #f9fafb;
-    --card: #171717;
-    --card-foreground: #f9fafb;
-    --popover: #171717;
-    --popover-foreground: #f9fafb;
-    --muted: #262626;
-    --muted-foreground: #a3a3a3;
-    --border: #262626;
-    --input: #262626;
+    --background: #0c0a09;
+    --foreground: #fafaf9;
+    --card: #1c1917;
+    --card-foreground: #fafaf9;
+    --popover: #1c1917;
+    --popover-foreground: #fafaf9;
+    --muted: #292524;
+    --muted-foreground: #a8a29e;
+    --border: #292524;
+    --input: #292524;
   }
 }
 
@@ -57,6 +61,7 @@
   --color-brand-magenta: var(--brand-magenta);
   --color-brand-purple: var(--brand-purple);
   --color-brand-dark: var(--brand-dark);
+
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -91,7 +96,7 @@
   --radius-sm: calc(var(--radius) - 4px);
 
   --font-sans: var(--font-quicksand);
-  --font-serif: var(--font-open-sans);
+  --font-serif: var(--font-quicksand);
 }
 
 @layer base {
@@ -100,5 +105,127 @@
   }
   body {
     @apply bg-background text-foreground font-sans;
+  }
+}
+
+@layer utilities {
+  .motion-panel {
+    animation: motion-panel-in 220ms var(--ease-out-quint) both;
+  }
+
+  .motion-list-item {
+    animation: motion-list-item-in 180ms var(--ease-out-quart) both;
+    animation-delay: calc(min(var(--i, 0), 8) * 24ms);
+  }
+
+  .motion-focus {
+    transition:
+      border-color 160ms var(--ease-out-quart),
+      box-shadow 160ms var(--ease-out-quart),
+      background-color 160ms var(--ease-out-quart),
+      transform 120ms var(--ease-out-quart);
+  }
+
+  .motion-focus:focus-visible {
+    transform: translateY(-1px);
+  }
+
+  @keyframes motion-panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+      filter: blur(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes motion-list-item-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes dialog-overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes dialog-overlay-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes dialog-content-in {
+    from {
+      opacity: 0;
+      translate: -50% calc(-50% + 8px);
+      transform: scale(0.98);
+      filter: blur(2px);
+    }
+    to {
+      opacity: 1;
+      translate: -50% -50%;
+      transform: scale(1);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes dialog-content-out {
+    from {
+      opacity: 1;
+      translate: -50% -50%;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      translate: -50% calc(-50% + 4px);
+      transform: scale(0.98);
+    }
+  }
+
+  @keyframes popover-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+
+    .motion-panel,
+    .motion-list-item {
+      animation: none !important;
+      filter: none !important;
+      transform: none !important;
+    }
   }
 }
