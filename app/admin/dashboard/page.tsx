@@ -23,6 +23,7 @@ import {
   getAllowedEmailsAction,
   saveAllowedEmailAction,
   deleteAllowedEmailAction,
+  importAllowedEmailsAction,
   getAdminResubmissionsAction,
   updateResubmissionStatusAction,
 } from "@/lib/actions/admin";
@@ -44,6 +45,87 @@ const emptyAccessForm = {
   studentId: "",
   className: "",
 };
+
+type CsvStudentRow = {
+  email: string;
+  studentId: string;
+  className: string;
+};
+
+const csvHeaderAliases = {
+  email: ["email", "student_email", "google_email"],
+  studentId: ["student_id", "studentid", "mssv", "ma_sv", "masv", "student code", "student_code"],
+  className: ["class_name", "classname", "class", "lop", "course"],
+};
+
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  cells.push(current.trim());
+  return cells;
+}
+
+function normalizeCsvHeader(header: string) {
+  return header
+    .trim()
+    .toLowerCase()
+    .replace(/^\uFEFF/, "")
+    .replace(/[\s-]+/g, "_");
+}
+
+function findHeaderIndex(headers: string[], aliases: string[]) {
+  return headers.findIndex((header) => aliases.includes(header));
+}
+
+function parseStudentCsv(content: string): CsvStudentRow[] {
+  const lines = content
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length < 2) {
+    throw new Error("CSV must include a header row and at least one student row.");
+  }
+
+  const headers = parseCsvLine(lines[0]).map(normalizeCsvHeader);
+  const emailIndex = findHeaderIndex(headers, csvHeaderAliases.email);
+  const studentIdIndex = findHeaderIndex(headers, csvHeaderAliases.studentId);
+  const classNameIndex = findHeaderIndex(headers, csvHeaderAliases.className);
+
+  if (emailIndex === -1 || studentIdIndex === -1 || classNameIndex === -1) {
+    throw new Error("CSV columns must include email, student_id/MSSV and class_name/class.");
+  }
+
+  return lines.slice(1).map((line) => {
+    const cells = parseCsvLine(line);
+
+    return {
+      email: cells[emailIndex] || "",
+      studentId: cells[studentIdIndex] || "",
+      className: cells[classNameIndex] || "",
+    };
+  });
+}
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -77,6 +159,7 @@ export default function AdminDashboardPage() {
   const debouncedAccessQuery = useDebounce(accessQuery, 400);
   const [loadingAccess, setLoadingAccess] = useState(false);
   const [savingAccess, setSavingAccess] = useState(false);
+  const [importingAccess, setImportingAccess] = useState(false);
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AllowedEmail | null>(null);
@@ -304,6 +387,42 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleImportAccessCsv = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".csv") && file.type !== "text/csv") {
+      toast.error("Please choose a CSV file.");
+      return;
+    }
+
+    setImportingAccess(true);
+    try {
+      const rows = parseStudentCsv(await file.text());
+      const json = await importAllowedEmailsAction(rows);
+
+      if (!json.success) {
+        toast.error(json.error || "Unable to import CSV.");
+        return;
+      }
+
+      const details = [
+        json.skipped ? `${json.skipped} invalid row(s) skipped` : null,
+        json.duplicates ? `${json.duplicates} duplicate email(s) merged` : null,
+      ].filter(Boolean);
+
+      toast.success(
+        `Imported ${json.imported || 0} student access record(s).${
+          details.length ? ` ${details.join(", ")}.` : ""
+        }`
+      );
+      setAccessPagination((prev) => ({ ...prev, page: 1 }));
+      if (accessPagination.page === 1) fetchAllowedEmails();
+    } catch (err) {
+      console.error("Failed to import student access CSV:", err);
+      toast.error(err instanceof Error ? err.message : "Unable to import CSV.");
+    } finally {
+      setImportingAccess(false);
+    }
+  };
+
   const handleLogout = () => {
     removeAuthCookie();
     toast.success("Signed out.");
@@ -425,6 +544,8 @@ export default function AdminDashboardPage() {
             }
             onRefresh={fetchAllowedEmails}
             onAdd={handleAddAccess}
+            onImportCsv={handleImportAccessCsv}
+            importing={importingAccess}
             onEdit={handleEditAccess}
             onDelete={setDeleteTarget}
           />
@@ -471,4 +592,3 @@ export default function AdminDashboardPage() {
     </div>
   );
 }
-

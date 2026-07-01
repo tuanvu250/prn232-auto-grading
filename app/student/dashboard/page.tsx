@@ -10,24 +10,59 @@ import { toast } from "sonner";
 import {
   LogOut,
   GraduationCap,
+  Calendar,
+  Code2,
+  Clock,
+  ChevronRight,
   User as UserIcon,
   ArrowUp,
+  ExternalLink,
+  RefreshCw,
+  TriangleAlert,
+  CheckCircle2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 import { LabAssignment, SubmissionHistory, TestcaseResult } from "@/lib/api/studentData";
 import { getStudentGradesAction } from "@/lib/actions/grades";
 import { getStudentResubmissionsAction, createResubmissionAction } from "@/lib/actions/resubmissions";
-
-import { StatusBadge } from "@/components/student/StatusBadge";
 import { LabList } from "@/components/student/LabList";
 import { LabSlider } from "@/components/student/LabSlider";
-import { MainPanelSkeleton } from "@/components/student/MainPanelSkeleton";
-import { ResubmissionDialog, ResubmissionRequest } from "@/components/student/ResubmissionDialog";
 import { DiagnosticConsole } from "@/components/student/DiagnosticConsole";
+import { MainPanelSkeleton } from "@/components/student/MainPanelSkeleton";
+
+interface ResubmissionRequest {
+  id: string;
+  lab_id: string;
+  drive_link: string;
+  note?: string | null;
+  admin_note?: string | null;
+  status: "pending" | "approved" | "rejected" | "completed";
+  updated_at: string;
+  completed_at?: string | null;
+}
 
 interface DbTestcase {
   name?: string;
@@ -77,6 +112,8 @@ const mapStatus = (status: string, score: number): "Passed" | "Failed" | "Gradin
   return score >= 5.0 ? "Passed" : "Failed";
 };
 
+
+
 export default function StudentDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserPayload | null>(null);
@@ -92,10 +129,6 @@ export default function StudentDashboardPage() {
   const [loadingGrades, setLoadingGrades] = useState(true);
   const [resubmissions, setResubmissions] = useState<ResubmissionRequest[]>([]);
   const [loadingResubmissions, setLoadingResubmissions] = useState(false);
-  const [savingResubmission, setSavingResubmission] = useState(false);
-  const [driveLink, setDriveLink] = useState("");
-  const [resubmitNote, setResubmitNote] = useState("");
-  const [resubmissionDialogOpen, setResubmissionDialogOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
 
   // Toggle the scroll-to-top button while scrolling.
@@ -154,14 +187,7 @@ export default function StudentDashboardPage() {
     }
   }, [selectedLab]);
 
-  useEffect(() => {
-    const currentRequest = selectedLab
-      ? resubmissions.find((request) => request.lab_id === selectedLab.id)
-      : null;
 
-    setDriveLink(currentRequest?.drive_link || "");
-    setResubmitNote(currentRequest?.note || "");
-  }, [selectedLab, resubmissions]);
 
   function mergeSubmissions(dbSubmissions: DbSubmission[]) {
     const updatedLabs: LabAssignment[] = dbSubmissions.map((sub) => {
@@ -262,12 +288,6 @@ export default function StudentDashboardPage() {
   }, [user]);
 
 
-  const handleLogout = () => {
-    removeAuthCookie();
-    toast.success("Signed out.");
-    router.push("/login");
-  };
-
 
   const handleSelectLab = (lab: LabAssignment, scrollToDetail = false) => {
     setSelectedLab(lab);
@@ -276,40 +296,12 @@ export default function StudentDashboardPage() {
     }
   };
 
-  const getSelectedResubmission = () => {
-    if (!selectedLab) return null;
-    return resubmissions.find((request) => request.lab_id === selectedLab.id) || null;
+  const handleLogout = () => {
+    removeAuthCookie();
+    toast.success("Signed out.");
+    router.push("/login");
   };
 
-  const handleSaveResubmission = async () => {
-    if (!selectedLab) return;
-
-    setSavingResubmission(true);
-    try {
-      const json = await createResubmissionAction({
-        labId: selectedLab.id,
-        driveLink,
-        note: resubmitNote,
-      });
-
-      if (!json.success) {
-        toast.error(json.error || "Unable to submit the resubmission request.");
-        return;
-      }
-
-      setResubmissions((prev) => {
-        const others = prev.filter((request) => request.id !== json.data.id);
-        return [json.data, ...others];
-      });
-      toast.success("Resubmission request sent. Admins will receive a Discord notification.");
-      setResubmissionDialogOpen(false);
-    } catch (err) {
-      console.error("Failed to save resubmission request:", err);
-      toast.error("Unable to reach the server.");
-    } finally {
-      setSavingResubmission(false);
-    }
-  };
 
 
   if (!user) {
@@ -427,19 +419,23 @@ export default function StudentDashboardPage() {
             <MainPanelSkeleton />
           ) : selectedLab ? (
             <DiagnosticConsole
-              user={user}
+              user={user!}
               selectedLab={selectedLab}
               selectedSubmission={selectedSubmission}
               onSelectSubmission={setSelectedSubmission}
               resubmissions={resubmissions}
-              onOpenResubmissionDialog={() => setResubmissionDialogOpen(true)}
+              loadingResubmissions={loadingResubmissions}
+              onResubmissionSaved={(newRequest) => {
+                setResubmissions((prev) => {
+                  const others = prev.filter((r) => r.id !== newRequest.id);
+                  return [newRequest, ...others];
+                });
+              }}
             />
           ) : (
             <Card className="border-border bg-card shadow-sm h-full flex items-center justify-center p-8 text-center text-muted-foreground font-sans">
               <div className="flex flex-col items-center gap-2 max-w-md">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <UserIcon className="h-4 w-4" />
-                </div>
+                <Code2 className="h-8 w-8 text-muted-foreground/60" />
                 <h3 className="font-bold text-foreground mt-2">No graded submissions yet</h3>
                 <p className="text-sm">
                   You have not submitted any assignments to the automated grading system yet.
@@ -461,20 +457,6 @@ export default function StudentDashboardPage() {
           <ArrowUp className="h-5 w-5" />
         </Button>
       )}
-
-      {/* Resubmission Dialog */}
-      <ResubmissionDialog
-        open={resubmissionDialogOpen}
-        onOpenChange={setResubmissionDialogOpen}
-        selectedLab={selectedLab}
-        driveLink={driveLink}
-        onDriveLinkChange={setDriveLink}
-        resubmitNote={resubmitNote}
-        onResubmitNoteChange={setResubmitNote}
-        saving={savingResubmission}
-        onSave={handleSaveResubmission}
-        currentRequest={getSelectedResubmission()}
-      />
     </div>
   );
 }

@@ -16,6 +16,10 @@ function normalizeEmail(email?: string) {
   return email?.trim().toLowerCase() || "";
 }
 
+function getErrorMessage(err: unknown) {
+  return err instanceof Error ? err.message : "Internal Server Error";
+}
+
 // ----------------- Whitelist (Allowed Emails) Actions -----------------
 
 export async function getAllowedEmailsAction(params: {
@@ -65,9 +69,9 @@ export async function getAllowedEmailsAction(params: {
         classes: classCount,
       },
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error fetching allowed emails:", err);
-    return { success: false, error: err.message || "Internal Server Error" };
+    return { success: false, error: getErrorMessage(err) };
   }
 }
 
@@ -123,9 +127,9 @@ export async function saveAllowedEmailAction(payload: {
 
       return { success: true, data };
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error saving allowed email:", err);
-    return { success: false, error: err.message || "Internal Server Error" };
+    return { success: false, error: getErrorMessage(err) };
   }
 }
 
@@ -149,9 +153,55 @@ export async function deleteAllowedEmailAction(email: string) {
     }
 
     return { success: true };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error deleting allowed email:", err);
-    return { success: false, error: err.message || "Internal Server Error" };
+    return { success: false, error: getErrorMessage(err) };
+  }
+}
+
+export async function importAllowedEmailsAction(
+  rows: Array<{
+    email: string;
+    studentId: string;
+    className: string;
+  }>
+) {
+  try {
+    await requireAdmin();
+
+    const normalizedRows = rows
+      .map((row) => ({
+        email: normalizeEmail(row.email),
+        student_id: row.studentId?.trim().toUpperCase() || "",
+        class_name: row.className?.trim().toUpperCase() || "",
+      }))
+      .filter((row) => row.email && row.student_id && row.class_name);
+
+    if (normalizedRows.length === 0) {
+      return { success: false, error: "No valid student rows found" };
+    }
+
+    const uniqueRows = Array.from(
+      new Map(normalizedRows.map((row) => [row.email, row])).values()
+    );
+
+    const { error } = await supabaseServer
+      .from("allowed_emails")
+      .upsert(uniqueRows, { onConflict: "email" });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      imported: uniqueRows.length,
+      skipped: rows.length - normalizedRows.length,
+      duplicates: normalizedRows.length - uniqueRows.length,
+    };
+  } catch (err: unknown) {
+    console.error("Error importing allowed emails:", err);
+    return { success: false, error: getErrorMessage(err) };
   }
 }
 
@@ -227,9 +277,9 @@ export async function getAdminResubmissionsAction(params: {
         completed: completedCount || 0,
       },
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error fetching admin resubmissions:", err);
-    return { success: false, error: err.message || "Internal Server Error" };
+    return { success: false, error: getErrorMessage(err) };
   }
 }
 
@@ -271,8 +321,8 @@ export async function updateResubmissionStatusAction(
     }
 
     return { success: true, data };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error updating admin resubmission:", err);
-    return { success: false, error: err.message || "Internal Server Error" };
+    return { success: false, error: getErrorMessage(err) };
   }
 }
