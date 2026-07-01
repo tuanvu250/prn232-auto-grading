@@ -10,20 +10,15 @@ import { toast } from "sonner";
 import {
   LogOut,
   GraduationCap,
-  Calendar,
   Code2,
-  Clock,
-  ChevronRight,
   User as UserIcon,
   ArrowUp,
-  ExternalLink,
   RefreshCw,
   TriangleAlert,
-  CheckCircle2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -34,20 +29,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 import { LabAssignment, SubmissionHistory, TestcaseResult } from "@/lib/api/studentData";
-import { getStudentGradesAction } from "@/lib/actions/grades";
-import { getStudentResubmissionsAction, createResubmissionAction } from "@/lib/actions/resubmissions";
+import { getStudentGradesAction, getStudentMissingLabsAction } from "@/lib/actions/grades";
+import {
+  getStudentResubmissionsAction,
+  createResubmissionAction,
+} from "@/lib/actions/resubmissions";
 import { LabList } from "@/components/student/LabList";
 import { LabSlider } from "@/components/student/LabSlider";
 import { DiagnosticConsole } from "@/components/student/DiagnosticConsole";
@@ -112,7 +101,16 @@ const mapStatus = (status: string, score: number): "Passed" | "Failed" | "Gradin
   return score >= 5.0 ? "Passed" : "Failed";
 };
 
-
+const createLateSubmissionLab = (labId: string): LabAssignment => ({
+  id: labId,
+  title: labId,
+  description: "No graded submission found for this lab.",
+  dueDate: "N/A",
+  weight: 0,
+  status: "NotSubmitted",
+  currentScore: 0,
+  submissions: [],
+});
 
 export default function StudentDashboardPage() {
   const router = useRouter();
@@ -128,8 +126,14 @@ export default function StudentDashboardPage() {
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionHistory | null>(null);
   const [loadingGrades, setLoadingGrades] = useState(true);
   const [resubmissions, setResubmissions] = useState<ResubmissionRequest[]>([]);
+  const [missingLabIds, setMissingLabIds] = useState<string[]>([]);
   const [loadingResubmissions, setLoadingResubmissions] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [lateDialogOpen, setLateDialogOpen] = useState(false);
+  const [lateLabId, setLateLabId] = useState("");
+  const [lateDriveLink, setLateDriveLink] = useState("");
+  const [lateNote, setLateNote] = useState("");
+  const [savingLateRequest, setSavingLateRequest] = useState(false);
 
   // Toggle the scroll-to-top button while scrolling.
   useEffect(() => {
@@ -187,9 +191,11 @@ export default function StudentDashboardPage() {
     }
   }, [selectedLab]);
 
-
-
-  function mergeSubmissions(dbSubmissions: DbSubmission[]) {
+  function mergeSubmissions(
+    dbSubmissions: DbSubmission[],
+    requestRows: ResubmissionRequest[] = resubmissions,
+    missingLabs: string[] = missingLabIds
+  ) {
     const updatedLabs: LabAssignment[] = dbSubmissions.map((sub) => {
       const details = sub.details || {};
       const tests = details.tests || [];
@@ -233,6 +239,20 @@ export default function StudentDashboardPage() {
       };
     });
 
+    requestRows.forEach((request) => {
+      const hasLab = updatedLabs.some((lab) => lab.id === request.lab_id);
+      if (hasLab) return;
+
+      updatedLabs.push(createLateSubmissionLab(request.lab_id));
+    });
+
+    missingLabs.forEach((labId) => {
+      const hasLab = updatedLabs.some((lab) => lab.id === labId);
+      if (hasLab) return;
+
+      updatedLabs.push(createLateSubmissionLab(labId));
+    });
+
     // Sort by lab name.
     updatedLabs.sort((a, b) => a.title.localeCompare(b.title));
     setLabs(updatedLabs);
@@ -245,13 +265,24 @@ export default function StudentDashboardPage() {
     const fetchGrades = async () => {
       setLoadingGrades(true);
       try {
-        const json = await getStudentGradesAction();
-        if (json.success) {
-          mergeSubmissions(json.data || []);
+        const [gradesJson, missingLabsJson] = await Promise.all([
+          getStudentGradesAction(),
+          getStudentMissingLabsAction(),
+        ]);
+
+        const nextMissingLabIds = missingLabsJson.success ? missingLabsJson.data || [] : [];
+        setMissingLabIds(nextMissingLabIds);
+
+        if (!missingLabsJson.success) {
+          console.error("Failed to load missing labs:", missingLabsJson.error);
+        }
+
+        if (gradesJson.success) {
+          mergeSubmissions(gradesJson.data || [], resubmissions, nextMissingLabIds);
         } else {
-          console.error("Failed to load grades:", json.error);
+          console.error("Failed to load grades:", gradesJson.error);
           toast.error("Unable to load grades.");
-          mergeSubmissions([]);
+          mergeSubmissions([], resubmissions, nextMissingLabIds);
         }
       } catch (err) {
         console.error("Grades API connection failed:", err);
@@ -273,7 +304,24 @@ export default function StudentDashboardPage() {
       try {
         const json = await getStudentResubmissionsAction();
         if (json.success) {
-          setResubmissions(json.data || []);
+          const requestRows = json.data || [];
+          setResubmissions(requestRows);
+          setLabs((prevLabs) => {
+            const updatedLabs = [...prevLabs];
+            requestRows.forEach((request) => {
+              const hasLab = updatedLabs.some((lab) => lab.id === request.lab_id);
+              if (hasLab) return;
+
+              updatedLabs.push(createLateSubmissionLab(request.lab_id));
+            });
+            missingLabIds.forEach((labId) => {
+              const hasLab = updatedLabs.some((lab) => lab.id === labId);
+              if (hasLab) return;
+
+              updatedLabs.push(createLateSubmissionLab(labId));
+            });
+            return updatedLabs.sort((a, b) => a.title.localeCompare(b.title));
+          });
         } else {
           console.error("Failed to load resubmission requests:", json.error);
         }
@@ -286,8 +334,6 @@ export default function StudentDashboardPage() {
 
     fetchResubmissions();
   }, [user]);
-
-
 
   const handleSelectLab = (lab: LabAssignment, scrollToDetail = false) => {
     setSelectedLab(lab);
@@ -302,7 +348,55 @@ export default function StudentDashboardPage() {
     router.push("/login");
   };
 
+  const handleSaveLateRequest = async () => {
+    const labId = lateLabId.trim();
+    const driveLink = lateDriveLink.trim();
 
+    if (!labId || !driveLink) {
+      toast.error("Lab ID and Drive link are required.");
+      return;
+    }
+
+    setSavingLateRequest(true);
+    try {
+      const json = await createResubmissionAction({
+        labId,
+        driveLink,
+        note: lateNote,
+      });
+
+      if (!json.success) {
+        toast.error(json.error || "Unable to submit the late submission request.");
+        return;
+      }
+
+      const newRequest = json.data as ResubmissionRequest;
+      setResubmissions((prev) => {
+        const others = prev.filter((r) => r.id !== newRequest.id);
+        return [newRequest, ...others];
+      });
+      setLabs((prevLabs) => {
+        if (prevLabs.some((lab) => lab.id === newRequest.lab_id)) {
+          return prevLabs;
+        }
+
+        return [...prevLabs, createLateSubmissionLab(newRequest.lab_id)].sort((a, b) =>
+          a.title.localeCompare(b.title)
+        );
+      });
+      setSelectedLab((current) => current || createLateSubmissionLab(newRequest.lab_id));
+      toast.success("Late submission request sent. Admins will receive a Discord notification.");
+      setLateDialogOpen(false);
+      setLateLabId("");
+      setLateDriveLink("");
+      setLateNote("");
+    } catch (err) {
+      console.error("Failed to save late submission request:", err);
+      toast.error("Unable to reach the server.");
+    } finally {
+      setSavingLateRequest(false);
+    }
+  };
 
   if (!user) {
     return (
@@ -438,13 +532,86 @@ export default function StudentDashboardPage() {
                 <Code2 className="h-8 w-8 text-muted-foreground/60" />
                 <h3 className="font-bold text-foreground mt-2">No graded submissions yet</h3>
                 <p className="text-sm">
-                  You have not submitted any assignments to the automated grading system yet.
+                  If you missed the first grading run, submit a Drive link for admin approval.
                 </p>
+                <Button className="mt-2" onClick={() => setLateDialogOpen(true)}>
+                  Request Late First Submission
+                </Button>
               </div>
             </Card>
           )}
         </section>
       </main>
+
+      <Dialog open={lateDialogOpen} onOpenChange={setLateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request Late First Submission</DialogTitle>
+            <DialogDescription>
+              Enter the lab ID and Google Drive link. Admins will review it before the grading tool
+              processes your submission.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3">
+            <div className="flex gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-3.5 text-sm leading-relaxed text-foreground ring-1 ring-primary/10">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <TriangleAlert className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-extrabold text-primary">Submission file requirement</p>
+                <p className="mt-0.5 text-muted-foreground">
+                  Compress your submission file and name it as{" "}
+                  <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                    Labx_MSSV
+                  </span>
+                  , for example{" "}
+                  <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                    Lab2_SE180123
+                  </span>
+                  .
+                </p>
+              </div>
+            </div>
+            <Input
+              value={lateLabId}
+              onChange={(event) => setLateLabId(event.target.value)}
+              placeholder="Lab2"
+              aria-label="Lab ID"
+            />
+            <Input
+              value={lateDriveLink}
+              onChange={(event) => setLateDriveLink(event.target.value)}
+              placeholder="https://drive.google.com/..."
+              aria-label="Google Drive late submission link"
+            />
+            <Textarea
+              value={lateNote}
+              onChange={(event) => setLateNote(event.target.value)}
+              placeholder="Optional note for admin"
+              className="min-h-[96px]"
+              aria-label="Late submission note"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setLateDialogOpen(false)}
+              disabled={savingLateRequest}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveLateRequest}
+              disabled={!lateLabId.trim() || !lateDriveLink.trim() || savingLateRequest}
+            >
+              {savingLateRequest ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Request Grading
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Scroll to Top Button */}
       {showScrollTop && (

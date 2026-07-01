@@ -1,14 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-import {
-  Clock,
-  ExternalLink,
-  RefreshCw,
-  TriangleAlert,
-  CheckCircle2,
-} from "lucide-react";
+import { Clock, ExternalLink, RefreshCw, TriangleAlert, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +48,8 @@ interface DiagnosticConsoleProps {
   loadingResubmissions: boolean;
   onResubmissionSaved: (request: ResubmissionRequest) => void;
 }
+
+type SubmissionRequestKind = "late_first" | "resubmit";
 
 const formatDate = (dateStr: string) => {
   try {
@@ -160,21 +156,27 @@ export function DiagnosticConsole({
   };
 
   const request = getSelectedResubmission();
+  const hasSubmission = Boolean(selectedSubmission);
+  const requestKind: SubmissionRequestKind = hasSubmission ? "resubmit" : "late_first";
+  const requestTitle =
+    requestKind === "late_first" ? "Late First Submission" : "Resubmission Request";
+  const requestDescription =
+    requestKind === "late_first"
+      ? "Submit a Google Drive link for this lab so admins can approve a late first grading run."
+      : "Submit a Google Drive link for the selected lab. You can submit again after admin review.";
+  const dialogTitle = request
+    ? requestKind === "late_first"
+      ? "Update Late Submission Request"
+      : "Update Resubmission Request"
+    : requestKind === "late_first"
+      ? "Request Late First Submission"
+      : "Submit Resubmission Request";
 
-  // Sync driveLink and resubmitNote when lab changes or request changes
-  useEffect(() => {
+  const openRequestDialog = () => {
     setDriveLink(request?.drive_link || "");
     setResubmitNote(request?.note || "");
-  }, [selectedLab, request]);
-
-  if (!selectedSubmission) {
-    return (
-      <div className="rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground font-sans">
-        This assignment has not been submitted yet. Submit your code through the grading
-        system to receive results.
-      </div>
-    );
-  }
+    setResubmissionDialogOpen(true);
+  };
 
   const isPending = request?.status === "pending";
   const isApproved = request?.status === "approved";
@@ -202,7 +204,11 @@ export function DiagnosticConsole({
       }
 
       onResubmissionSaved(json.data);
-      toast.success("Resubmission request sent. Admins will receive a Discord notification.");
+      toast.success(
+        requestKind === "late_first"
+          ? "Late submission request sent. Admins will receive a Discord notification."
+          : "Resubmission request sent. Admins will receive a Discord notification."
+      );
       setResubmissionDialogOpen(false);
     } catch (err) {
       console.error("Failed to save resubmission request:", err);
@@ -229,56 +235,69 @@ export function DiagnosticConsole({
     <Card className="border-border bg-card shadow-sm h-full flex flex-col">
       <CardContent className="min-w-0 flex-1 p-3 sm:p-6 space-y-6">
         {/* Submission Information Panel */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-6">
-          <div className="min-w-0 space-y-1">
-            <h3 className="break-words text-xl font-extrabold font-sans text-foreground tracking-tight sm:text-2xl">
-              {user.studentId || "Student ID"}
-            </h3>
-            <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-              <span>
-                Status:{" "}
-                <span className="font-semibold text-foreground">
-                  {selectedSubmission.status}
+        {selectedSubmission ? (
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-6">
+            <div className="min-w-0 space-y-1">
+              <h3 className="break-words text-xl font-extrabold font-sans text-foreground tracking-tight sm:text-2xl">
+                {user.studentId || "Student ID"}
+              </h3>
+              <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                <span>
+                  Status:{" "}
+                  <span className="font-semibold text-foreground">{selectedSubmission.status}</span>
                 </span>
-              </span>
-              <span>•</span>
-              <span>
-                Total score:{" "}
-                <span className="font-extrabold text-foreground">
-                  {selectedSubmission.score.toFixed(2)} / 10
+                <span>•</span>
+                <span>
+                  Total score:{" "}
+                  <span className="font-extrabold text-foreground">
+                    {selectedSubmission.score.toFixed(2)} / 10
+                  </span>
                 </span>
-              </span>
-              <span>•</span>
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" /> At {selectedSubmission.submittedAt}
-              </span>
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" /> At {selectedSubmission.submittedAt}
+                </span>
+              </div>
+            </div>
+
+            {/* Version selection dropdown */}
+            {selectedLab.submissions.length > 1 && (
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-muted-foreground font-medium">
+                  Submission version:
+                </span>
+                <select
+                  value={selectedSubmission.version}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    const sub = selectedLab.submissions.find((s) => s.version === v);
+                    if (sub) onSelectSubmission(sub);
+                  }}
+                  className="rounded border border-border bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted/30 transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {selectedLab.submissions.map((sub) => (
+                    <option key={sub.version} value={sub.version}>
+                      Version {sub.version}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-muted/20 p-6">
+            <div className="max-w-2xl space-y-2">
+              <Badge variant="outline">Not Submitted</Badge>
+              <h3 className="break-words text-xl font-extrabold font-sans text-foreground tracking-tight">
+                {selectedLab.title}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                No graded result exists for this lab yet. If you missed the first grading run,
+                submit a Drive link below for admin approval.
+              </p>
             </div>
           </div>
-
-          {/* Version selection dropdown */}
-          {selectedLab.submissions.length > 1 && (
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-xs text-muted-foreground font-medium">
-                Submission version:
-              </span>
-              <select
-                value={selectedSubmission.version}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value);
-                  const sub = selectedLab.submissions.find((s) => s.version === v);
-                  if (sub) onSelectSubmission(sub);
-                }}
-                className="rounded border border-border bg-background px-2.5 py-1.5 text-xs font-semibold hover:bg-muted/30 transition-all cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                {selectedLab.submissions.map((sub) => (
-                  <option key={sub.version} value={sub.version}>
-                    Version {sub.version}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
+        )}
 
         <div className="space-y-6">
           {/* Resubmission Request Section */}
@@ -286,9 +305,7 @@ export function DiagnosticConsole({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-bold text-foreground">
-                    Resubmission Request
-                  </h3>
+                  <h3 className="text-sm font-bold text-foreground">{requestTitle}</h3>
                   {request ? (
                     <Badge
                       className={
@@ -311,10 +328,7 @@ export function DiagnosticConsole({
                     </Badge>
                   ) : null}
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Submit a Google Drive link for the selected lab. You can submit
-                  again after admin review.
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">{requestDescription}</p>
                 <p className="mt-2 text-xs font-medium text-muted-foreground">
                   {requestStatusText}
                 </p>
@@ -335,7 +349,7 @@ export function DiagnosticConsole({
                 ) : null}
                 <Button
                   size="sm"
-                  onClick={() => setResubmissionDialogOpen(true)}
+                  onClick={openRequestDialog}
                   disabled={isApproved}
                   variant={isCompleted ? "outline" : "default"}
                 >
@@ -345,25 +359,20 @@ export function DiagnosticConsole({
                       ? "Update Request"
                       : request
                         ? "Submit Again"
-                        : "Submit Request"}
+                        : requestKind === "late_first"
+                          ? "Request Grading"
+                          : "Submit Request"}
                 </Button>
               </div>
             </div>
 
-            <Dialog
-              open={resubmissionDialogOpen}
-              onOpenChange={setResubmissionDialogOpen}
-            >
+            <Dialog open={resubmissionDialogOpen} onOpenChange={setResubmissionDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>
-                    {request
-                      ? "Update Resubmission Request"
-                      : "Submit Resubmission Request"}
-                  </DialogTitle>
+                  <DialogTitle>{dialogTitle}</DialogTitle>
                   <DialogDescription>
-                    Submit a Google Drive link for {selectedLab.title}. Admins will
-                    review the request from the control console.
+                    Submit a Google Drive link for {selectedLab.title}. Admins will review the
+                    request from the control console.
                   </DialogDescription>
                 </DialogHeader>
 
@@ -373,9 +382,7 @@ export function DiagnosticConsole({
                       <TriangleAlert className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <p className="font-extrabold text-primary">
-                        Submission file requirement
-                      </p>
+                      <p className="font-extrabold text-primary">Submission file requirement</p>
                       <p className="mt-0.5 text-muted-foreground">
                         Compress your submission file and name it as{" "}
                         <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
@@ -423,7 +430,9 @@ export function DiagnosticConsole({
                       ? "Update Link"
                       : request
                         ? "Submit Again"
-                        : "Submit Request"}
+                        : requestKind === "late_first"
+                          ? "Request Grading"
+                          : "Submit Request"}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -431,7 +440,7 @@ export function DiagnosticConsole({
           </div>
 
           {/* Build logs block */}
-          {selectedSubmission.buildLogs && (
+          {selectedSubmission?.buildLogs && (
             <div className="space-y-2">
               {(() => {
                 const isErrorBuild =
@@ -469,111 +478,115 @@ export function DiagnosticConsole({
           )}
 
           {/* Testcases list Table */}
-          <div className="border border-border rounded-lg overflow-hidden overflow-x-auto bg-card w-full">
-            <Table className="max-lg:min-w-[680px]">
-              <TableHeader className="bg-muted/50 border-b">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
-                    Method
-                  </TableHead>
-                  <TableHead className="text-xs font-bold uppercase text-muted-foreground">
-                    URL / Rule
-                  </TableHead>
-                  <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
-                    Pass
-                  </TableHead>
-                  <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
-                    Awarded
-                  </TableHead>
-                  <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
-                    HTTP
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {getSortedTestcases(selectedSubmission).map((tc, idx) => {
-                  const { method, rule } = parseTestcase(tc.name);
-                  const isPassed = tc.status === "pass";
-                  const awarded = tc.score !== undefined ? tc.score : isPassed ? 1 : 0;
-                  const httpCode =
-                    tc.actualStatusCode !== undefined && tc.actualStatusCode !== null
-                      ? tc.actualStatusCode
-                      : method === "SOURCE"
-                        ? "-"
-                        : "200";
+          {selectedSubmission ? (
+            <div className="border border-border rounded-lg overflow-hidden overflow-x-auto bg-card w-full">
+              <Table className="max-lg:min-w-[680px]">
+                <TableHeader className="bg-muted/50 border-b">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                      Method
+                    </TableHead>
+                    <TableHead className="text-xs font-bold uppercase text-muted-foreground">
+                      URL / Rule
+                    </TableHead>
+                    <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
+                      Pass
+                    </TableHead>
+                    <TableHead className="w-[100px] text-xs font-bold uppercase text-muted-foreground">
+                      Awarded
+                    </TableHead>
+                    <TableHead className="w-[80px] text-xs font-bold uppercase text-muted-foreground">
+                      HTTP
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {getSortedTestcases(selectedSubmission).map((tc, idx) => {
+                    const { method, rule } = parseTestcase(tc.name);
+                    const isPassed = tc.status === "pass";
+                    const awarded = tc.score !== undefined ? tc.score : isPassed ? 1 : 0;
+                    const httpCode =
+                      tc.actualStatusCode !== undefined && tc.actualStatusCode !== null
+                        ? tc.actualStatusCode
+                        : method === "SOURCE"
+                          ? "-"
+                          : "200";
 
-                  return (
-                    <TableRow
-                      key={idx}
-                      className="hover:bg-muted/5 border-b border-border/40 transition-colors"
-                    >
-                      <TableCell className="py-3">{getMethodBadge(method)}</TableCell>
-                      <TableCell
-                        className="py-3 text-xs text-foreground max-w-[180px] sm:max-w-[350px] truncate"
-                        title={rule}
+                    return (
+                      <TableRow
+                        key={idx}
+                        className="hover:bg-muted/5 border-b border-border/40 transition-colors"
                       >
-                        {renderHighlightedRule(rule)}
-                      </TableCell>
-                      <TableCell className="py-3">
-                        {isPassed ? (
-                          <span className="text-emerald-500 font-bold text-base">✓</span>
-                        ) : (
-                          <span className="text-red-500 font-bold text-base">X</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="py-3 font-semibold text-xs text-foreground">
-                        {awarded.toFixed(1)}
-                      </TableCell>
-                      <TableCell className="py-3 font-medium text-xs text-muted-foreground">
-                        {httpCode}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                        <TableCell className="py-3">{getMethodBadge(method)}</TableCell>
+                        <TableCell
+                          className="py-3 text-xs text-foreground max-w-[180px] sm:max-w-[350px] truncate"
+                          title={rule}
+                        >
+                          {renderHighlightedRule(rule)}
+                        </TableCell>
+                        <TableCell className="py-3">
+                          {isPassed ? (
+                            <span className="text-emerald-500 font-bold text-base">✓</span>
+                          ) : (
+                            <span className="text-red-500 font-bold text-base">X</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-3 font-semibold text-xs text-foreground">
+                          {awarded.toFixed(1)}
+                        </TableCell>
+                        <TableCell className="py-3 font-medium text-xs text-muted-foreground">
+                          {httpCode}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
 
           {/* Response details Section */}
-          <div className="mt-8 min-w-0 space-y-4">
-            <h3 className="text-base font-bold font-sans tracking-tight text-foreground border-b pb-2">
-              Response details
-            </h3>
-            <div className="min-w-0 space-y-4">
-              {getSortedTestcases(selectedSubmission).map((tc, idx) => {
-                const { method, rule } = parseTestcase(tc.name);
-                return (
-                  <div key={idx} className="min-w-0 space-y-1.5">
-                    {/* Header: Method Rule */}
-                    <div className="break-words text-xs font-bold text-muted-foreground font-mono [overflow-wrap:anywhere] flex items-center gap-1.5">
-                      {getMethodBadge(method)}
-                      {renderHighlightedRule(rule)}
+          {selectedSubmission ? (
+            <div className="mt-8 min-w-0 space-y-4">
+              <h3 className="text-base font-bold font-sans tracking-tight text-foreground border-b pb-2">
+                Response details
+              </h3>
+              <div className="min-w-0 space-y-4">
+                {getSortedTestcases(selectedSubmission).map((tc, idx) => {
+                  const { method, rule } = parseTestcase(tc.name);
+                  return (
+                    <div key={idx} className="min-w-0 space-y-1.5">
+                      {/* Header: Method Rule */}
+                      <div className="break-words text-xs font-bold text-muted-foreground font-mono [overflow-wrap:anywhere] flex items-center gap-1.5">
+                        {getMethodBadge(method)}
+                        {renderHighlightedRule(rule)}
+                      </div>
+
+                      {/* Preformatted box for Response */}
+                      {tc.actualResponse ? (
+                        <div className="w-full min-w-0 overflow-hidden rounded-lg border border-[#e2e8f0] bg-[#f8f9fa]">
+                          <pre className="max-w-full overflow-x-auto p-3.5 text-[13px] font-mono leading-relaxed text-slate-800 whitespace-pre sm:text-sm lg:overflow-visible lg:text-xs lg:whitespace-pre-wrap lg:break-all">
+                            {formatResponse(tc.actualResponse)}
+                          </pre>
+                        </div>
+                      ) : (
+                        <div className="text-xs italic text-muted-foreground/60 pl-3">
+                          No response details available
+                        </div>
+                      )}
+
+                      {/* Red error message if failed */}
+                      {tc.status === "fail" && tc.message && (
+                        <p className="mt-1 break-words pl-1 text-xs font-semibold text-red-500 font-sans [overflow-wrap:anywhere]">
+                          {tc.message}
+                        </p>
+                      )}
                     </div>
-
-                    {/* Preformatted box for Response */}
-                    {tc.actualResponse ? (
-                      <div className="w-full min-w-0 overflow-hidden rounded-lg border border-[#e2e8f0] bg-[#f8f9fa]">
-                        <pre className="max-w-full overflow-x-auto p-3.5 text-[13px] font-mono leading-relaxed text-slate-800 whitespace-pre sm:text-sm lg:overflow-visible lg:text-xs lg:whitespace-pre-wrap lg:break-all">
-                          {formatResponse(tc.actualResponse)}
-                        </pre>
-                      </div>
-                    ) : (
-                      <div className="text-xs italic text-muted-foreground/60 pl-3">
-                        No response details available
-                      </div>
-                    )}
-
-                    {/* Red error message if failed */}
-                    {tc.status === "fail" && tc.message && (
-                      <p className="mt-1 break-words pl-1 text-xs font-semibold text-red-500 font-sans [overflow-wrap:anywhere]">
-                        {tc.message}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>
