@@ -1,6 +1,7 @@
 "use client";
 
-import { Pencil, RefreshCw, Trash2, Users } from "lucide-react";
+import { ChangeEvent } from "react";
+import { FileUp, Pencil, RefreshCw, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,8 +33,10 @@ interface StudentAccessPanelProps {
   onPageSizeChange: (pageSize: number) => void;
   onRefresh: () => void;
   onAdd: () => void;
+  onImportCsv: (file: File) => void;
   onEdit: (item: AllowedEmail) => void;
   onDelete: (item: AllowedEmail) => void;
+  importing: boolean;
 }
 
 export function StudentAccessPanel({
@@ -47,9 +50,20 @@ export function StudentAccessPanel({
   onPageSizeChange,
   onRefresh,
   onAdd,
+  onImportCsv,
   onEdit,
   onDelete,
+  importing,
 }: StudentAccessPanelProps) {
+  const handleCsvChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (file) {
+      onImportCsv(file);
+    }
+  };
+
   return (
     <div className="motion-panel space-y-4">
       <Card className="border-border bg-card shadow-sm">
@@ -79,6 +93,23 @@ export function StudentAccessPanel({
               />
 
               <div className="flex shrink-0 items-center gap-2">
+                <Button asChild variant="outline">
+                  <label className={importing ? "pointer-events-none opacity-50" : ""}>
+                    {importing ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileUp className="h-4 w-4" />
+                    )}
+                    Import CSV
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="sr-only"
+                      onChange={handleCsvChange}
+                      disabled={importing}
+                    />
+                  </label>
+                </Button>
                 <Button
                   variant="outline"
                   size="icon"
