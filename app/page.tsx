@@ -116,7 +116,7 @@ export default function HomePage() {
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl text-center">Sign In</CardTitle>
             <CardDescription className="text-center">
-              Use your Google account to access your dashboard
+              Use your Google Education account to access your dashboard
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center justify-center p-6">

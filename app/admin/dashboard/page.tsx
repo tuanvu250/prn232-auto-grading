@@ -3,11 +3,13 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
 import {
+  BarChart3,
   GraduationCap,
   KeyRound,
   LogOut,
@@ -131,6 +133,7 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserPayload | null>(null);
   const [activeView, setActiveView] = useState<AdminView>("resubmissions");
+  const [avatarError, setAvatarError] = useState(false);
 
   const [requests, setRequests] = useState<ResubmissionRequest[]>([]);
   const [requestStatus, setRequestStatus] = useState("pending");
@@ -156,6 +159,7 @@ export default function AdminDashboardPage() {
 
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [accessQuery, setAccessQuery] = useState("");
+  const [accessClassFilter, setAccessClassFilter] = useState("all");
   const debouncedAccessQuery = useDebounce(accessQuery, 400);
   const [loadingAccess, setLoadingAccess] = useState(false);
   const [savingAccess, setSavingAccess] = useState(false);
@@ -173,6 +177,7 @@ export default function AdminDashboardPage() {
   const [accessSummary, setAccessSummary] = useState<AccessSummary>({
     total: 0,
     classes: 0,
+    classNames: [],
   });
 
   useEffect(() => {
@@ -195,6 +200,10 @@ export default function AdminDashboardPage() {
       router.push("/");
     }
   }, [router]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.picture]);
 
   const fetchRequests = async () => {
     setLoadingRequests(true);
@@ -229,6 +238,7 @@ export default function AdminDashboardPage() {
         page: accessPagination.page,
         pageSize: accessPagination.pageSize,
         q: debouncedAccessQuery.trim() || undefined,
+        className: accessClassFilter !== "all" ? accessClassFilter : undefined,
       });
 
       if (!json.success) {
@@ -253,7 +263,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     setAccessPagination((prev) => ({ ...prev, page: 1 }));
-  }, [debouncedAccessQuery]);
+  }, [debouncedAccessQuery, accessClassFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -269,7 +279,14 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!user || activeView !== "studentAccess") return;
     fetchAllowedEmails();
-  }, [user, activeView, accessPagination.page, accessPagination.pageSize, debouncedAccessQuery]);
+  }, [
+    user,
+    activeView,
+    accessPagination.page,
+    accessPagination.pageSize,
+    debouncedAccessQuery,
+    accessClassFilter,
+  ]);
 
   const handleUpdateRequestStatus = async (
     id: string,
@@ -474,12 +491,25 @@ export default function AdminDashboardPage() {
               <KeyRound className="h-4 w-4" />
               Student Access
             </button>
+            <Link
+              href="/admin/student-results"
+              className="flex min-w-[190px] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Student Results
+            </Link>
           </nav>
 
           <div className="mt-auto hidden border-t border-border p-4 lg:block">
             <div className="flex min-w-0 items-center gap-3">
-              {user.picture ? (
-                <img src={user.picture} alt={user.name} className="h-9 w-9 rounded-full border" />
+              {user.picture && !avatarError ? (
+                <img
+                  src={user.picture}
+                  alt={user.name}
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
+                  className="h-9 w-9 rounded-full border"
+                />
               ) : (
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
                   <UserIcon className="h-4 w-4" />
@@ -535,9 +565,11 @@ export default function AdminDashboardPage() {
             allowedEmails={allowedEmails}
             summary={accessSummary}
             query={accessQuery}
+            classFilter={accessClassFilter}
             loading={loadingAccess}
             pagination={accessPagination}
             onQueryChange={setAccessQuery}
+            onClassFilterChange={setAccessClassFilter}
             onPageChange={(page) => setAccessPagination((prev) => ({ ...prev, page }))}
             onPageSizeChange={(pageSize) =>
               setAccessPagination((prev) => ({ ...prev, page: 1, pageSize }))

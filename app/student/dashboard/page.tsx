@@ -129,6 +129,7 @@ export default function StudentDashboardPage() {
   const [missingLabIds, setMissingLabIds] = useState<string[]>([]);
   const [loadingResubmissions, setLoadingResubmissions] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
   const [lateDialogOpen, setLateDialogOpen] = useState(false);
   const [lateLabId, setLateLabId] = useState("");
   const [lateDriveLink, setLateDriveLink] = useState("");
@@ -171,6 +172,10 @@ export default function StudentDashboardPage() {
       router.push("/");
     }
   }, [router]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.picture]);
 
   // Keep selectedLab in sync when labs are refreshed.
   useEffect(() => {
@@ -426,10 +431,12 @@ export default function StudentDashboardPage() {
           <div className="flex shrink-0 items-center gap-2 sm:gap-4">
             {/* User Profile Info */}
             <div className="flex min-w-0 items-center gap-3 border-r border-border pr-3 sm:pr-4">
-              {user.picture ? (
+              {user.picture && !avatarError ? (
                 <img
                   src={user.picture}
                   alt={user.name}
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
                   className="h-8 w-8 shrink-0 rounded-full border border-border"
                 />
               ) : (
