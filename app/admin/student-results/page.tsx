@@ -45,6 +45,7 @@ const emptySummary: StudentResultSummary = {
 export default function AdminStudentResultsPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserPayload | null>(null);
+  const [avatarError, setAvatarError] = useState(false);
   const [classes, setClasses] = useState<string[]>([]);
   const [labs, setLabs] = useState<string[]>([]);
   const [selectedClass, setSelectedClass] = useState("");
@@ -82,6 +83,10 @@ export default function AdminStudentResultsPage() {
       router.push("/");
     }
   }, [router]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.picture]);
 
   const fetchFilters = async (className?: string) => {
     setLoadingFilters(true);
@@ -249,8 +254,14 @@ export default function AdminStudentResultsPage() {
 
           <div className="mt-auto hidden border-t border-border p-4 lg:block">
             <div className="flex min-w-0 items-center gap-3">
-              {user.picture ? (
-                <img src={user.picture} alt={user.name} className="h-9 w-9 rounded-full border" />
+              {user.picture && !avatarError ? (
+                <img
+                  src={user.picture}
+                  alt={user.name}
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
+                  className="h-9 w-9 rounded-full border"
+                />
               ) : (
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
                   <UserIcon className="h-4 w-4" />

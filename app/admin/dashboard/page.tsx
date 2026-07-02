@@ -133,6 +133,7 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserPayload | null>(null);
   const [activeView, setActiveView] = useState<AdminView>("resubmissions");
+  const [avatarError, setAvatarError] = useState(false);
 
   const [requests, setRequests] = useState<ResubmissionRequest[]>([]);
   const [requestStatus, setRequestStatus] = useState("pending");
@@ -197,6 +198,10 @@ export default function AdminDashboardPage() {
       router.push("/");
     }
   }, [router]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.picture]);
 
   const fetchRequests = async () => {
     setLoadingRequests(true);
@@ -487,8 +492,14 @@ export default function AdminDashboardPage() {
 
           <div className="mt-auto hidden border-t border-border p-4 lg:block">
             <div className="flex min-w-0 items-center gap-3">
-              {user.picture ? (
-                <img src={user.picture} alt={user.name} className="h-9 w-9 rounded-full border" />
+              {user.picture && !avatarError ? (
+                <img
+                  src={user.picture}
+                  alt={user.name}
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
+                  className="h-9 w-9 rounded-full border"
+                />
               ) : (
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
                   <UserIcon className="h-4 w-4" />
