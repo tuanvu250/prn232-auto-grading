@@ -159,6 +159,7 @@ export default function AdminDashboardPage() {
 
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [accessQuery, setAccessQuery] = useState("");
+  const [accessClassFilter, setAccessClassFilter] = useState("all");
   const debouncedAccessQuery = useDebounce(accessQuery, 400);
   const [loadingAccess, setLoadingAccess] = useState(false);
   const [savingAccess, setSavingAccess] = useState(false);
@@ -176,6 +177,7 @@ export default function AdminDashboardPage() {
   const [accessSummary, setAccessSummary] = useState<AccessSummary>({
     total: 0,
     classes: 0,
+    classNames: [],
   });
 
   useEffect(() => {
@@ -236,6 +238,7 @@ export default function AdminDashboardPage() {
         page: accessPagination.page,
         pageSize: accessPagination.pageSize,
         q: debouncedAccessQuery.trim() || undefined,
+        className: accessClassFilter !== "all" ? accessClassFilter : undefined,
       });
 
       if (!json.success) {
@@ -260,7 +263,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     setAccessPagination((prev) => ({ ...prev, page: 1 }));
-  }, [debouncedAccessQuery]);
+  }, [debouncedAccessQuery, accessClassFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -276,7 +279,14 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (!user || activeView !== "studentAccess") return;
     fetchAllowedEmails();
-  }, [user, activeView, accessPagination.page, accessPagination.pageSize, debouncedAccessQuery]);
+  }, [
+    user,
+    activeView,
+    accessPagination.page,
+    accessPagination.pageSize,
+    debouncedAccessQuery,
+    accessClassFilter,
+  ]);
 
   const handleUpdateRequestStatus = async (
     id: string,
@@ -555,9 +565,11 @@ export default function AdminDashboardPage() {
             allowedEmails={allowedEmails}
             summary={accessSummary}
             query={accessQuery}
+            classFilter={accessClassFilter}
             loading={loadingAccess}
             pagination={accessPagination}
             onQueryChange={setAccessQuery}
+            onClassFilterChange={setAccessClassFilter}
             onPageChange={(page) => setAccessPagination((prev) => ({ ...prev, page }))}
             onPageSizeChange={(pageSize) =>
               setAccessPagination((prev) => ({ ...prev, page: 1, pageSize }))

@@ -4,6 +4,13 @@ import { ChangeEvent } from "react";
 import { FileUp, Pencil, RefreshCw, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -19,15 +26,18 @@ import { AllowedEmail, EmptyTableRow } from "./Dialogs";
 export interface AccessSummary {
   total: number;
   classes: number;
+  classNames?: string[];
 }
 
 interface StudentAccessPanelProps {
   allowedEmails: AllowedEmail[];
   summary: AccessSummary;
   query: string;
+  classFilter: string;
   loading: boolean;
   pagination: PaginationMeta;
   onQueryChange: (value: string) => void;
+  onClassFilterChange: (value: string) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onRefresh: () => void;
@@ -42,9 +52,11 @@ export function StudentAccessPanel({
   allowedEmails,
   summary,
   query,
+  classFilter,
   loading,
   pagination,
   onQueryChange,
+  onClassFilterChange,
   onPageChange,
   onPageSizeChange,
   onRefresh,
@@ -81,6 +93,22 @@ export function StudentAccessPanel({
 
         {/* Search & Actions */}
         <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center md:justify-end">
+          <div className="w-full sm:w-[160px]">
+            <Select value={classFilter} onValueChange={onClassFilterChange}>
+              <SelectTrigger className="h-10">
+                <SelectValue placeholder="Class" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All classes</SelectItem>
+                {(summary.classNames || []).map((className) => (
+                  <SelectItem key={className} value={className}>
+                    {className}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}

@@ -43,6 +43,7 @@ function mapSubmissionStatus(submission?: SubmissionRow | null) {
 
 export async function getAllowedEmailsAction(params: {
   q?: string;
+  className?: string;
   page: number;
   pageSize: number;
 }) {
@@ -50,6 +51,7 @@ export async function getAllowedEmailsAction(params: {
     await requireAdmin();
 
     const query = params.q?.trim();
+    const className = params.className?.trim();
     const page = params.page || 1;
     const pageSize = params.pageSize || 10;
     const from = (page - 1) * pageSize;
@@ -65,6 +67,10 @@ export async function getAllowedEmailsAction(params: {
       allowedQuery = allowedQuery.or(
         `email.ilike.%${query}%,student_id.ilike.%${query}%,class_name.ilike.%${query}%`
       );
+    }
+
+    if (className && className !== "all") {
+      allowedQuery = allowedQuery.eq("class_name", className);
     }
 
     const { data, count, error } = await allowedQuery.range(from, to);
@@ -84,6 +90,9 @@ export async function getAllowedEmailsAction(params: {
       summary: {
         total: count || 0,
         classes: classCount,
+        classNames: Array.from(
+          new Set((classRows || []).map((row) => row.class_name).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b)),
       },
     };
   } catch (err: unknown) {
