@@ -32,10 +32,19 @@ docs/api/2026-07-01-add-class-name-to-submissions.sql
 Moi lan grading tool upsert vao bang `submissions`, payload phai gui them
 `class_name`.
 
+`lab_id` phai duoc normalize cung mot format giua grading tool,
+`submissions`, va `resubmission_requests`. Hien tai web app normalize request
+ve lowercase, vi du `Lab2` -> `lab2`. Grading tool nen dung cung format nay
+truoc khi:
+
+- tim request `approved`
+- upsert vao `submissions`
+- mark request thanh `completed`
+
 ```json
 {
   "student_id": "SE180123",
-  "lab_id": "Lab2",
+  "lab_id": "lab2",
   "class_name": "SE1815",
   "score": 8.5,
   "status": "Done",
@@ -48,7 +57,7 @@ Moi lan grading tool upsert vao bang `submissions`, payload phai gui them
 ```python
 payload.append({
     "student_id": student_id,
-    "lab_id": lab_id,
+    "lab_id": lab_id.strip().lower(),
     "class_name": class_name,
     "score": item["Score"],
     "status": item["Status"],

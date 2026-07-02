@@ -48,7 +48,7 @@ export async function createResubmissionAction(payload: {
       return { success: false, error: "Unauthorized" };
     }
 
-    const labId = payload.labId?.trim();
+    const labId = payload.labId?.trim().toLowerCase();
     const driveLink = payload.driveLink?.trim();
     const note = payload.note?.trim() || null;
 
