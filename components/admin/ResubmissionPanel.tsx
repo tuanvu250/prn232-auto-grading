@@ -364,41 +364,47 @@ export function ResubmissionPanel({
                             Drive
                           </a>
                         </Button>
-                        <Button
-                          size="sm"
-                          disabled={request.status !== "pending" || updatingId === request.id}
-                          onClick={() => onApprove(request.id)}
-                        >
-                          {updatingId === request.id ? (
-                            <RefreshCw className="mr-2 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
-                          )}
-                          Approve
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={request.status !== "approved" || updatingId === request.id}
-                          onClick={() => onComplete(request.id)}
-                        >
-                          {updatingId === request.id ? (
-                            <RefreshCw className="mr-2 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
-                          )}
-                          Complete
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          disabled={request.status !== "pending" || updatingId === request.id}
-                          onClick={() => onReject(request)}
-                        >
-                          <XCircle className="mr-2 h-3.5 w-3.5" />
-                          Reject
-                        </Button>
+                        {request.status === "pending" ? (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={updatingId === request.id}
+                              onClick={() => onApprove(request.id)}
+                            >
+                              {updatingId === request.id ? (
+                                <RefreshCw className="mr-2 h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                              )}
+                              Approve
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              disabled={updatingId === request.id}
+                              onClick={() => onReject(request)}
+                            >
+                              <XCircle className="mr-2 h-3.5 w-3.5" />
+                              Reject
+                            </Button>
+                          </>
+                        ) : null}
+                        {request.status === "approved" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={updatingId === request.id}
+                            onClick={() => onComplete(request.id)}
+                          >
+                            {updatingId === request.id ? (
+                              <RefreshCw className="mr-2 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                            )}
+                            Complete
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
