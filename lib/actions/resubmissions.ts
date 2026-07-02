@@ -13,6 +13,33 @@ function isDriveLink(url: string) {
   }
 }
 
+const PENDING_RATE_LIMIT = 5;
+const PENDING_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+async function checkPendingRateLimit(studentId: string) {
+  const windowStart = new Date(Date.now() - PENDING_RATE_LIMIT_WINDOW_MS).toISOString();
+
+  const { count, error } = await supabaseServer
+    .from("resubmission_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("student_id", studentId)
+    .eq("status", "pending")
+    .gte("updated_at", windowStart);
+
+  if (error) {
+    return { allowed: false, error: error.message };
+  }
+
+  if ((count || 0) >= PENDING_RATE_LIMIT) {
+    return {
+      allowed: false,
+      error: "You can only submit or update 5 pending resubmission requests per hour.",
+    };
+  }
+
+  return { allowed: true };
+}
+
 export async function getStudentResubmissionsAction() {
   try {
     const user = await getServerUser();
@@ -58,6 +85,11 @@ export async function createResubmissionAction(payload: {
 
     if (!isDriveLink(driveLink)) {
       return { success: false, error: "Drive link must be a valid Google Drive URL" };
+    }
+
+    const rateLimit = await checkPendingRateLimit(user.studentId);
+    if (!rateLimit.allowed) {
+      return { success: false, error: rateLimit.error || "Too many pending requests" };
     }
 
     const { data: existingActive, error: existingError } = await supabaseServer
