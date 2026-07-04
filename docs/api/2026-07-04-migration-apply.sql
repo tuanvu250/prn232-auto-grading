@@ -16,9 +16,10 @@
 
 begin;
 
--- 5a. Infer exactly one current term and create it (adjust the name/dates before running).
+-- 5a. Infer exactly one current term and create it. All existing production data lives under
+-- a single term, SU26 (2026-05-11 -> 2026-08-30), confirmed by the admin before this run.
 insert into terms (name, starts_on, ends_on)
-values ('CURRENT-TERM', current_date - interval '4 months', current_date + interval '2 months')
+values ('SU26', date '2026-05-11', date '2026-08-30')
 on conflict (name) do nothing;
 
 -- 5b. One class row per distinct normalized class_name, attached to that term.
@@ -29,7 +30,7 @@ from (
   from allowed_emails
   where btrim(coalesce(class_name, '')) <> ''
 ) distinct_class
-cross join (select id from terms where name = 'CURRENT-TERM') t
+cross join (select id from terms where name = 'SU26') t
 on conflict (term_id, name) do nothing;
 
 -- 5c. Students + class membership from the allowed_emails whitelist.
@@ -43,7 +44,7 @@ select c.id, s.id
 from allowed_emails ae
 join students s on s.email = lower(btrim(ae.email))
 join classes c on c.name = upper(btrim(ae.class_name))
-  and c.term_id = (select id from terms where name = 'CURRENT-TERM')
+  and c.term_id = (select id from terms where name = 'SU26')
 on conflict (class_id, student_id) do nothing;
 
 -- 5d. One lab catalog row per distinct normalized lab code, then assign it to every class that
@@ -54,7 +55,7 @@ from submissions
 on conflict (code) do nothing;
 
 insert into class_labs (class_id, lab_id, deadline)
-select distinct c.id, l.id, null
+select distinct c.id, l.id, null::timestamptz
 from submissions sub
 join students s on s.student_code = upper(btrim(sub.student_id))
 join class_students cs on cs.student_id = s.id
@@ -90,7 +91,7 @@ from submissions sub
 join students s on s.student_code = upper(btrim(sub.student_id))
 join class_students cs on cs.student_id = s.id
 join classes c on c.id = cs.class_id
-  and c.term_id = (select id from terms where name = 'CURRENT-TERM')
+  and c.term_id = (select id from terms where name = 'SU26')
 join labs l on l.code = upper(btrim(sub.lab_id))
 join class_labs cl on cl.class_id = c.id and cl.lab_id = l.id
 on conflict (class_student_id, class_lab_id, attempt_no) do nothing;
