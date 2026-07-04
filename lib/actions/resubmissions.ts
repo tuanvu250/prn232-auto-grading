@@ -87,6 +87,26 @@ export async function createResubmissionAction(payload: {
       return { success: false, error: "Drive link must be a valid Google Drive URL" };
     }
 
+    // Prevent spamming by enforcing a 60-second cooldown between submission actions (create or update)
+    const { data: lastRequest, error: lastRequestError } = await supabaseServer
+      .from("resubmission_requests")
+      .select("updated_at")
+      .eq("student_id", user.studentId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastRequest && !lastRequestError) {
+      const timeSinceLast = Date.now() - new Date(lastRequest.updated_at).getTime();
+      if (timeSinceLast < 60000) {
+        const secondsLeft = Math.ceil((60000 - timeSinceLast) / 1000);
+        return {
+          success: false,
+          error: `Please wait ${secondsLeft} second(s) before submitting or updating requests again.`,
+        };
+      }
+    }
+
     const rateLimit = await checkPendingRateLimit(user.studentId);
     if (!rateLimit.allowed) {
       return { success: false, error: rateLimit.error || "Too many pending requests" };
