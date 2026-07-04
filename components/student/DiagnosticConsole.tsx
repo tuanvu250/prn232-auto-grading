@@ -396,6 +396,19 @@ export function DiagnosticConsole({
                       </p>
                     </div>
                   </div>
+
+                  <div className="flex gap-3 rounded-lg border border-red-200 bg-red-50/50 p-3.5 text-sm leading-relaxed text-red-800 dark:border-red-900/30 dark:bg-red-950/10 dark:text-red-200">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-red-100/80 text-red-600 dark:bg-red-950 dark:text-red-400">
+                      <TriangleAlert className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-red-800 dark:text-red-300">Important Note</p>
+                      <p className="mt-0.5 text-xs text-red-700 dark:text-red-400 font-medium">
+                        Please do not spam requests. Kindly wait for the admin to review and process your submission.
+                      </p>
+                    </div>
+                  </div>
+
                   <Input
                     value={driveLink}
                     onChange={(event) => setDriveLink(event.target.value)}
