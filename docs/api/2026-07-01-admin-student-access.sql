@@ -1,3 +1,8 @@
+-- Superseded 2026-07-04 by docs/api/2026-07-04-normalize-erd-schema.sql:
+-- `allowed_emails` is the pre-normalization legacy table, replaced by
+-- `students`/`class_students`. Kept alive only until production has run
+-- stably on the new schema (Phase 7). Do not apply this file to a fresh project.
+
 create table if not exists allowed_emails (
   email text primary key,
   student_id text not null,

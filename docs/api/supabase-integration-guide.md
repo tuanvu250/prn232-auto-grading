@@ -1,5 +1,14 @@
 # Hướng dẫn Tích hợp Supabase làm Database hiển thị điểm PRN232
 
+> **Superseded 2026-07-04**: the schema sections below describe the original
+> Google-Sheets-to-Supabase migration (flat `submissions`/`allowed_emails`
+> tables). The normalized ERD (`docs/api/2026-07-04-normalize-erd-schema.sql`)
+> replaces that schema with `terms`/`classes`/`labs`/`class_labs`/`students`/
+> `class_students`/`submissions` (attempt-based) — see `plan.md` in
+> `plans/260704-normalize-grading-erd/` for the current model. The initial
+> project-setup steps (Supabase account/project creation) below are still
+> accurate; only the table design has changed.
+
 Tài liệu này hướng dẫn cách chuyển đổi cơ sở dữ liệu từ Google Sheets sang **Supabase (PostgreSQL)** để lưu trữ điểm số theo đợt/lab/lớp từ máy local và hiển thị realtime lên ứng dụng Next.js deploy trực tuyến.
 
 ---

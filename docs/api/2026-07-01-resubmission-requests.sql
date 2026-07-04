@@ -1,3 +1,9 @@
+-- Superseded 2026-07-04 by docs/api/2026-07-04-normalize-erd-schema.sql:
+-- `resubmission_requests` is the pre-normalization legacy table (string FKs:
+-- email/class_name/lab_id), replaced by `resubmission_requests_v2` (FK to
+-- `submission_id`). Kept alive only until production has run stably on the
+-- new schema (Phase 7). Do not apply this file to a fresh project.
+
 create table if not exists resubmission_requests (
   id uuid primary key default gen_random_uuid(),
   student_id text not null,

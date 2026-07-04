@@ -9,7 +9,6 @@ import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
 import {
-  BarChart3,
   GraduationCap,
   KeyRound,
   LogOut,
@@ -492,11 +491,11 @@ export default function AdminDashboardPage() {
               Student Access
             </button>
             <Link
-              href="/admin/student-results"
+              href="/admin/terms"
               className="flex min-w-[190px] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
             >
-              <BarChart3 className="h-4 w-4" />
-              Student Results
+              <GraduationCap className="h-4 w-4" />
+              Terms / Classes / Labs
             </Link>
           </nav>
 
