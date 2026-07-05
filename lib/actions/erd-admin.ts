@@ -7,6 +7,8 @@ import type {
   ClassRow,
   ClassLab,
   ClassLabStudentResult,
+  ClassLabSubmission,
+  ResubmissionRequestV2,
 } from "@/lib/types/erd";
 
 async function requireAdmin() {
@@ -174,3 +176,188 @@ export async function createClassAction(termId: string, name: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+
+export async function getAdminStudentSubmissionsAction(
+  classStudentId: string,
+  classLabId: string
+): Promise<ClassLabSubmission[]> {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("class_lab_submissions")
+    .select("*")
+    .eq("class_student_id", classStudentId)
+    .eq("class_lab_id", classLabId)
+    .order("attempt_no", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getAdminStudentResubmissionsAction(
+  classStudentId: string,
+  classLabId: string
+): Promise<ResubmissionRequestV2[]> {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("resubmission_requests_v2")
+    .select("*")
+    .eq("class_student_id", classStudentId)
+    .eq("class_lab_id", classLabId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function updateStudentSubmissionAction(
+  submissionId: string,
+  payload: { score: number; status: "passed" | "failed" | "grading"; sourceUrl: string }
+) {
+  await requireAdmin();
+
+  const { score, status, sourceUrl } = payload;
+
+  const { data, error } = await supabaseServer
+    .from("class_lab_submissions")
+    .update({
+      score,
+      status,
+      source_url: sourceUrl,
+      graded_at: new Date().toISOString(),
+    })
+    .eq("id", submissionId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteStudentSubmissionAction(submissionId: string) {
+  await requireAdmin();
+
+  // Xóa các resubmission requests liên kết trước (do constraint ON DELETE RESTRICT)
+  const { error: deleteRequestsError } = await supabaseServer
+    .from("resubmission_requests_v2")
+    .delete()
+    .eq("submission_id", submissionId);
+
+  if (deleteRequestsError) {
+    throw new Error(`Failed to clean up linked resubmission requests: ${deleteRequestsError.message}`);
+  }
+
+  // Xóa submission
+  const { data, error } = await supabaseServer
+    .from("class_lab_submissions")
+    .delete()
+    .eq("id", submissionId)
+    .select();
+
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+export async function updateTermAction(
+  termId: string,
+  name: string,
+  startsOn: string | null,
+  endsOn: string | null
+) {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("terms")
+    .update({
+      name: name.trim(),
+      starts_on: startsOn,
+      ends_on: endsOn,
+    })
+    .eq("id", termId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteTermAction(termId: string) {
+  await requireAdmin();
+
+  // 1. Lấy danh sách các lớp thuộc term
+  const { data: classes, error: selectClassesError } = await supabaseServer
+    .from("classes")
+    .select("id")
+    .eq("term_id", termId);
+
+  if (selectClassesError) throw new Error(selectClassesError.message);
+
+  const classIds = (classes || []).map((c) => c.id);
+
+  if (classIds.length > 0) {
+    // 2. Xóa các lớp này (sẽ tự động cascade delete class_students, class_labs, class_lab_submissions)
+    const { error: deleteClassesError } = await supabaseServer
+      .from("classes")
+      .delete()
+      .in("id", classIds);
+
+    if (deleteClassesError) {
+      throw new Error(`Failed to delete associated classes: ${deleteClassesError.message}`);
+    }
+  }
+
+  // 3. Xóa term
+  const { data, error } = await supabaseServer
+    .from("terms")
+    .delete()
+    .eq("id", termId)
+    .select();
+
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+export async function updateClassAction(classId: string, name: string) {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("classes")
+    .update({
+      name: name.trim().toUpperCase(),
+    })
+    .eq("id", classId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteClassAction(classId: string) {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("classes")
+    .delete()
+    .eq("id", classId)
+    .select();
+
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+export async function deleteClassLabAction(classLabId: string) {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("class_labs")
+    .delete()
+    .eq("id", classLabId)
+    .select();
+
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+

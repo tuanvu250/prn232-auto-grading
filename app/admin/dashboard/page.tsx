@@ -3,18 +3,10 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
-import {
-  GraduationCap,
-  KeyRound,
-  LogOut,
-  UploadCloud,
-  User as UserIcon,
-} from "lucide-react";
 
 import { useDebounce } from "@/hooks/useDebounce";
 import { Button } from "@/components/ui/button";
@@ -27,6 +19,7 @@ import {
   importAllowedEmailsAction,
   getAdminResubmissionsAction,
   updateResubmissionStatusAction,
+  getAdminDashboardStatsAction,
 } from "@/lib/actions/admin";
 import {
   AllowedEmail,
@@ -38,25 +31,30 @@ import {
 import { PaginationMeta } from "@/components/admin/TablePagination";
 import { ResubmissionPanel, ResubmissionSummary } from "@/components/admin/ResubmissionPanel";
 import { StudentAccessPanel, AccessSummary } from "@/components/admin/StudentAccessPanel";
+import { OverviewPanel } from "./components/OverviewPanel";
+import { OverviewSkeleton } from "./components/OverviewSkeleton";
 
-type AdminView = "resubmissions" | "studentAccess";
+type AdminView = "overview" | "resubmissions" | "studentAccess";
 
 const emptyAccessForm = {
   email: "",
   studentId: "",
   className: "",
+  name: "",
 };
 
 type CsvStudentRow = {
   email: string;
   studentId: string;
   className: string;
+  name?: string;
 };
 
 const csvHeaderAliases = {
   email: ["email", "student_email", "google_email"],
   studentId: ["student_id", "studentid", "mssv", "ma_sv", "masv", "student code", "student_code"],
   className: ["class_name", "classname", "class", "lop", "course"],
+  name: ["name", "fullname", "full_name", "ten", "ho_ten", "ho_va_ten", "display_name", "username"],
 };
 
 function parseCsvLine(line: string) {
@@ -112,6 +110,7 @@ function parseStudentCsv(content: string): CsvStudentRow[] {
   const emailIndex = findHeaderIndex(headers, csvHeaderAliases.email);
   const studentIdIndex = findHeaderIndex(headers, csvHeaderAliases.studentId);
   const classNameIndex = findHeaderIndex(headers, csvHeaderAliases.className);
+  const nameIndex = findHeaderIndex(headers, csvHeaderAliases.name);
 
   if (emailIndex === -1 || studentIdIndex === -1 || classNameIndex === -1) {
     throw new Error("CSV columns must include email, student_id/MSSV and class_name/class.");
@@ -124,15 +123,19 @@ function parseStudentCsv(content: string): CsvStudentRow[] {
       email: cells[emailIndex] || "",
       studentId: cells[studentIdIndex] || "",
       className: cells[classNameIndex] || "",
+      name: nameIndex !== -1 ? cells[nameIndex] || "" : "",
     };
   });
 }
 
 export default function AdminDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewParam = searchParams.get("view");
   const [user, setUser] = useState<UserPayload | null>(null);
-  const [activeView, setActiveView] = useState<AdminView>("resubmissions");
-  const [avatarError, setAvatarError] = useState(false);
+  const [activeView, setActiveView] = useState<AdminView>("overview");
+  const [overviewData, setOverviewData] = useState<any>(null);
+  const [loadingOverview, setLoadingOverview] = useState(true);
 
   const [requests, setRequests] = useState<ResubmissionRequest[]>([]);
   const [requestStatus, setRequestStatus] = useState("pending");
@@ -179,6 +182,36 @@ export default function AdminDashboardPage() {
     classNames: [],
   });
 
+  const fetchOverviewData = async () => {
+    setLoadingOverview(true);
+    try {
+      const json = await getAdminDashboardStatsAction();
+      if (!json.success) {
+        toast.error(json.error || "Unable to load dashboard overview.");
+        return;
+      }
+      setOverviewData(json.data);
+    } catch (err) {
+      console.error("Failed to load dashboard overview:", err);
+      toast.error("Unable to reach the server.");
+    } finally {
+      setLoadingOverview(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewParam === "overview" || viewParam === "resubmissions" || viewParam === "studentAccess") {
+      setActiveView(viewParam as AdminView);
+    } else if (!viewParam) {
+      setActiveView("overview");
+    }
+  }, [viewParam]);
+
+  useEffect(() => {
+    if (!user || activeView !== "overview") return;
+    fetchOverviewData();
+  }, [user, activeView]);
+
   useEffect(() => {
     const token = Cookies.get("authToken");
     if (!token) {
@@ -199,10 +232,6 @@ export default function AdminDashboardPage() {
       router.push("/");
     }
   }, [router]);
-
-  useEffect(() => {
-    setAvatarError(false);
-  }, [user?.picture]);
 
   const fetchRequests = async () => {
     setLoadingRequests(true);
@@ -337,6 +366,7 @@ export default function AdminDashboardPage() {
       email: item.email,
       studentId: item.student_id,
       className: item.class_name,
+      name: item.name || "",
     });
     setAccessDialogOpen(true);
   };
@@ -362,16 +392,16 @@ export default function AdminDashboardPage() {
       });
 
       if (!json.success) {
-        toast.error(json.error || "Unable to save student access.");
+        toast.error(json.error || "Unable to save student.");
         return;
       }
 
-      toast.success(editingEmail ? "Student access updated." : "Student access added.");
+      toast.success(editingEmail ? "Student updated." : "Student added.");
       resetAccessForm();
       setAccessPagination((prev) => ({ ...prev, page: 1 }));
       if (accessPagination.page === 1) fetchAllowedEmails();
     } catch (err) {
-      console.error("Failed to save student access:", err);
+      console.error("Failed to save student:", err);
       toast.error("Unable to reach the server.");
     } finally {
       setSavingAccess(false);
@@ -384,11 +414,11 @@ export default function AdminDashboardPage() {
       const json = await deleteAllowedEmailAction(deleteTarget.email);
 
       if (!json.success) {
-        toast.error(json.error || "Unable to delete student access.");
+        toast.error(json.error || "Unable to delete student.");
         return;
       }
 
-      toast.success("Student access deleted.");
+      toast.success("Student deleted.");
       if (editingEmail === deleteTarget.email) resetAccessForm();
       setDeleteTarget(null);
       const nextPage =
@@ -398,7 +428,7 @@ export default function AdminDashboardPage() {
       setAccessPagination((prev) => ({ ...prev, page: nextPage }));
       if (nextPage === accessPagination.page) fetchAllowedEmails();
     } catch (err) {
-      console.error("Failed to delete student access:", err);
+      console.error("Failed to delete student:", err);
       toast.error("Unable to reach the server.");
     }
   };
@@ -425,7 +455,7 @@ export default function AdminDashboardPage() {
       ].filter(Boolean);
 
       toast.success(
-        `Imported ${json.imported || 0} student access record(s).${
+        `Imported ${json.imported || 0} student(s).${
           details.length ? ` ${details.join(", ")}.` : ""
         }`
       );
@@ -439,12 +469,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleLogout = () => {
-    removeAuthCookie();
-    toast.success("Signed out.");
-    router.push("/");
-  };
-
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -454,140 +478,71 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[280px_1fr]">
-      <aside className="border-b border-border bg-card lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
-        <div className="flex h-full flex-col">
-          <div className="flex items-center gap-3 border-b border-border p-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <GraduationCap className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-base font-extrabold tracking-tight">PRN232 Admin</p>
-              <p className="text-xs text-muted-foreground">Control console</p>
-            </div>
-          </div>
-
-          <nav className="flex gap-2 overflow-x-auto p-3 lg:flex-col lg:overflow-visible">
-            <button
-              onClick={() => setActiveView("resubmissions")}
-              className={`flex min-w-[190px] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors lg:min-w-0 ${
-                activeView === "resubmissions"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <UploadCloud className="h-4 w-4" />
-              Resubmit Requests
-            </button>
-            <button
-              onClick={() => setActiveView("studentAccess")}
-              className={`flex min-w-[190px] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors lg:min-w-0 ${
-                activeView === "studentAccess"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <KeyRound className="h-4 w-4" />
-              Student Access
-            </button>
-            <Link
-              href="/admin/terms"
-              className="flex min-w-[190px] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
-            >
-              <GraduationCap className="h-4 w-4" />
-              Terms / Classes / Labs
-            </Link>
-          </nav>
-
-          <div className="mt-auto hidden border-t border-border p-4 lg:block">
-            <div className="flex min-w-0 items-center gap-3">
-              {user.picture && !avatarError ? (
-                <img
-                  src={user.picture}
-                  alt={user.name}
-                  referrerPolicy="no-referrer"
-                  onError={() => setAvatarError(true)}
-                  className="h-9 w-9 rounded-full border"
-                />
-              ) : (
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <UserIcon className="h-4 w-4" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold">{user.name}</p>
-                <p className="truncate text-[10px] text-muted-foreground">{user.email}</p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={handleLogout} title="Sign out">
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <main className="min-w-0 space-y-5 p-4 sm:p-6 lg:p-8">
-        <div className="flex items-start justify-between gap-3 lg:hidden">
-          <div className="min-w-0">
-            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={handleLogout} title="Sign out">
-            <LogOut className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {activeView === "resubmissions" ? (
-          <ResubmissionPanel
-            requests={requests}
-            stats={requestSummary}
-            status={requestStatus}
-            query={requestQuery}
-            loading={loadingRequests}
-            updatingId={updatingRequestId}
-            pagination={requestPagination}
-            onStatusChange={(value) => {
-              setRequestStatus(value);
-              setRequestPagination((prev) => ({ ...prev, page: 1 }));
-            }}
-            onQueryChange={setRequestQuery}
-            onPageChange={(page) => setRequestPagination((prev) => ({ ...prev, page }))}
-            onPageSizeChange={(pageSize) =>
-              setRequestPagination((prev) => ({ ...prev, page: 1, pageSize }))
-            }
-            onRefresh={fetchRequests}
-            onApprove={(id) => handleUpdateRequestStatus(id, "approved")}
-            onComplete={(id) => handleUpdateRequestStatus(id, "completed")}
-            onReject={handleOpenReject}
-          />
+    <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
+      {activeView === "overview" ? (
+        loadingOverview && !overviewData ? (
+          <OverviewSkeleton />
         ) : (
-          <StudentAccessPanel
-            allowedEmails={allowedEmails}
-            summary={accessSummary}
-            query={accessQuery}
-            classFilter={accessClassFilter}
-            loading={loadingAccess}
-            pagination={accessPagination}
-            onQueryChange={setAccessQuery}
-            onClassFilterChange={setAccessClassFilter}
-            onPageChange={(page) => setAccessPagination((prev) => ({ ...prev, page }))}
-            onPageSizeChange={(pageSize) =>
-              setAccessPagination((prev) => ({ ...prev, page: 1, pageSize }))
-            }
-            onRefresh={fetchAllowedEmails}
-            onAdd={handleAddAccess}
-            onImportCsv={handleImportAccessCsv}
-            importing={importingAccess}
-            onEdit={handleEditAccess}
-            onDelete={setDeleteTarget}
+          <OverviewPanel
+            metrics={overviewData?.metrics || { totalStudents: 0, totalClasses: 0, totalSubmissions: 0, pendingResubmissions: 0 }}
+            gradeDistribution={overviewData?.gradeDistribution || []}
+            recentResubmissions={overviewData?.recentResubmissions || []}
+            recentSubmissions={overviewData?.recentSubmissions || []}
+            onViewChange={(view) => router.push(`/admin/dashboard?view=${view}`)}
           />
-        )}
-      </main>
+        )
+      ) : activeView === "resubmissions" ? (
+        <ResubmissionPanel
+          requests={requests}
+          stats={requestSummary}
+          status={requestStatus}
+          query={requestQuery}
+          loading={loadingRequests}
+          updatingId={updatingRequestId}
+          pagination={requestPagination}
+          onStatusChange={(value) => {
+            setRequestStatus(value);
+            setRequestPagination((prev) => ({ ...prev, page: 1 }));
+          }}
+          onQueryChange={setRequestQuery}
+          onPageChange={(page) => setRequestPagination((prev) => ({ ...prev, page }))}
+          onPageSizeChange={(pageSize) =>
+            setRequestPagination((prev) => ({ ...prev, page: 1, pageSize }))
+          }
+          onRefresh={fetchRequests}
+          onApprove={(id) => handleUpdateRequestStatus(id, "approved")}
+          onComplete={(id) => handleUpdateRequestStatus(id, "completed")}
+          onReject={handleOpenReject}
+        />
+      ) : (
+        <StudentAccessPanel
+          allowedEmails={allowedEmails}
+          summary={accessSummary}
+          query={accessQuery}
+          classFilter={accessClassFilter}
+          loading={loadingAccess}
+          pagination={accessPagination}
+          onQueryChange={setAccessQuery}
+          onClassFilterChange={setAccessClassFilter}
+          onPageChange={(page) => setAccessPagination((prev) => ({ ...prev, page }))}
+          onPageSizeChange={(pageSize) =>
+            setAccessPagination((prev) => ({ ...prev, page: 1, pageSize }))
+          }
+          onRefresh={fetchAllowedEmails}
+          onAdd={handleAddAccess}
+          onImportCsv={handleImportAccessCsv}
+          importing={importingAccess}
+          onEdit={handleEditAccess}
+          onDelete={setDeleteTarget}
+        />
+      )}
 
       <StudentAccessDialog
         open={accessDialogOpen}
         editingEmail={editingEmail}
         form={accessForm}
         saving={savingAccess}
+        classNames={accessSummary.classNames || []}
         onOpenChange={(open) => {
           setAccessDialogOpen(open);
           if (!open) resetAccessForm();
@@ -623,3 +578,4 @@ export default function AdminDashboardPage() {
     </div>
   );
 }
+

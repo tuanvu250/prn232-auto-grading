@@ -1,6 +1,7 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,10 +16,19 @@ import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 export interface AllowedEmail {
   email: string;
   student_id: string;
   class_name: string;
+  name?: string | null;
 }
 
 export interface ResubmissionRequest {
@@ -42,13 +52,17 @@ const emptyAccessForm = {
   email: "",
   studentId: "",
   className: "",
+  name: "",
 };
+
+const CREATE_CLASS_VALUE = "__create_class__";
 
 interface StudentAccessDialogProps {
   open: boolean;
   editingEmail: string | null;
   form: typeof emptyAccessForm;
   saving: boolean;
+  classNames: string[];
   onOpenChange: (open: boolean) => void;
   onFormChange: (value: typeof emptyAccessForm) => void;
   onSave: () => void;
@@ -59,19 +73,34 @@ export function StudentAccessDialog({
   editingEmail,
   form,
   saving,
+  classNames,
   onOpenChange,
   onFormChange,
   onSave,
 }: StudentAccessDialogProps) {
-  const canSave = form.email.trim() && form.studentId.trim() && form.className.trim() && !saving;
+  const [creatingClass, setCreatingClass] = useState(false);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setCreatingClass(false);
+    }
+    onOpenChange(nextOpen);
+  };
+
+  const canSave =
+    form.email.trim() &&
+    form.studentId.trim() &&
+    form.className.trim() &&
+    form.name.trim() &&
+    !saving;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editingEmail ? "Edit Student Access" : "Add Student Access"}</DialogTitle>
+          <DialogTitle>{editingEmail ? "Edit Student" : "Add Student"}</DialogTitle>
           <DialogDescription>
-            The email must match the Google account the student uses to sign in.
+            Enter the details of the student. The email must match their Google sign-in account.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -83,20 +112,59 @@ export function StudentAccessDialog({
             aria-label="Student email"
           />
           <Input
+            value={form.name}
+            onChange={(event) => onFormChange({ ...form, name: event.target.value })}
+            placeholder="Full Name, for example Nguyen Van A"
+            aria-label="Student name"
+          />
+          <Input
             value={form.studentId}
             onChange={(event) => onFormChange({ ...form, studentId: event.target.value })}
             placeholder="Student ID, for example SE182672"
             aria-label="Student ID"
           />
-          <Input
-            value={form.className}
-            onChange={(event) => onFormChange({ ...form, className: event.target.value })}
-            placeholder="Class, for example SE1815"
-            aria-label="Class"
-          />
+
+          <Select
+            value={creatingClass ? CREATE_CLASS_VALUE : form.className}
+            onValueChange={(val) => {
+              if (val === CREATE_CLASS_VALUE) {
+                setCreatingClass(true);
+                onFormChange({ ...form, className: "" });
+                return;
+              }
+
+              setCreatingClass(false);
+              onFormChange({ ...form, className: val });
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select Class" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={CREATE_CLASS_VALUE} className="font-medium text-primary">
+                <span className="inline-flex items-center gap-2">
+                  <Plus className="h-3.5 w-3.5" />
+                  Create new class
+                </span>
+              </SelectItem>
+              {(classNames || []).map((cName) => (
+                <SelectItem key={cName} value={cName}>
+                  {cName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {creatingClass ? (
+            <Input
+              value={form.className}
+              onChange={(event) => onFormChange({ ...form, className: event.target.value })}
+              placeholder="New class name, for example SE1827"
+              aria-label="New class name"
+            />
+          ) : null}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
           <Button onClick={onSave} disabled={!canSave}>
@@ -193,7 +261,11 @@ export function RejectResubmissionDialog({
   );
 }
 
-export function StatusBadge({ status }: { status: "pending" | "approved" | "rejected" | "completed" }) {
+export function StatusBadge({
+  status,
+}: {
+  status: "pending" | "approved" | "rejected" | "completed";
+}) {
   const className =
     status === "pending"
       ? "border-none bg-amber-500 text-white hover:bg-amber-600"

@@ -44,15 +44,36 @@ export interface SubmissionTestcase {
   max_score?: number;
   actual_response?: string | null;
   actual_status_code?: number | null;
+
+  // Fields from buildSyncDetails / JSON
+  method?: string;
+  httpMethod?: string;
+  url?: string;
+  urlTemplate?: string;
+  awardedScore?: number;
+  effectiveScore?: number;
+  statusCode?: number | null;
+  actualStatusCode?: number | null;
+  errorMessage?: string | null;
+  actualResponse?: string | null;
+  manualOverrideScore?: number | null;
+  overrideReason?: string | null;
 }
 
 export interface SubmissionDetails {
   tests?: SubmissionTestcase[];
+  results?: SubmissionTestcase[];
   passed?: number;
   total?: number;
   build_logs?: string;
   buildLogs?: string;
   log?: string;
+  jobStatus?: string;
+  totalScore?: number;
+  latestJobId?: string;
+  studentCode?: string;
+  submissionId?: string;
+  submissionStatus?: string;
 }
 
 export interface ClassLabSubmission {
