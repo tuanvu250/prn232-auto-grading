@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
+import { queryCache } from "@/lib/utils/queryCache";
 import { getStudentLabOverviewAction } from "@/lib/actions/erd-student";
 import type { StudentClassLabOverview } from "@/lib/types/erd";
 
@@ -49,13 +50,26 @@ export default function StudentDashboardPage() {
   }, [router]);
 
   const loadLabs = useCallback(async () => {
-    setLoading(true);
+    const cached = queryCache.get<StudentClassLabOverview[]>("student-labs", 60000); // 1 minute stale time
+    if (cached.data) {
+      setLabs(cached.data);
+      setLoading(false);
+      if (!cached.isStale) {
+        return;
+      }
+    } else {
+      setLoading(true);
+    }
+
     try {
       const data = await getStudentLabOverviewAction();
       setLabs(data);
+      queryCache.set("student-labs", data);
     } catch (err) {
       console.error("Failed to load lab overview:", err);
-      toast.error("Unable to load your labs.");
+      if (!cached.data) {
+        toast.error("Unable to load your labs.");
+      }
     } finally {
       setLoading(false);
     }

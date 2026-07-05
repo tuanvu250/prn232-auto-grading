@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { UserPayload } from "@/lib/utils/auth";
+import { queryCache } from "@/lib/utils/queryCache";
 import {
   ArrowLeft,
   TriangleAlert,
@@ -15,6 +16,7 @@ import {
   AlertCircle,
   FileJson,
   Calendar,
+  FileUp,
   Layers,
 } from "lucide-react";
 
@@ -143,31 +145,62 @@ export default function ClassLabAttemptsPage() {
   const [submittingResubmit, setSubmittingResubmit] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = `lab-details-${params.classLabId}`;
+    const cached = queryCache.get<{ attempts: ClassLabSubmission[]; request: ResubmissionRequestV2 | null }>(cacheKey, 30000); // 30 seconds stale time
+
+    if (cached.data) {
+      setAttempts(cached.data.attempts);
+      setRequest(cached.data.request);
+      setLoading(false);
+      if (!cached.isStale) {
+        return;
+      }
+    } else {
+      setLoading(true);
+    }
+
     try {
       const [attemptRows, requestRow] = await Promise.all([
         getClassLabAttemptsAction(params.classLabId),
         getResubmissionRequestForClassLabAction(params.classLabId),
       ]);
+
       setAttempts(attemptRows);
       setRequest(requestRow);
 
-      // Determine initial active attempt
-      if (attemptRows.length > 0) {
-        if (urlSubmissionId && attemptRows.some((a) => a.id === urlSubmissionId)) {
-          setSelectedAttemptId(urlSubmissionId);
-        } else {
-          // Default to latest attempt (last item since ordered ascending)
-          setSelectedAttemptId(attemptRows[attemptRows.length - 1].id);
-        }
-      }
+      // Update cache
+      queryCache.set(cacheKey, { attempts: attemptRows, request: requestRow });
     } catch (err) {
       console.error("Failed to load attempt history:", err);
-      toast.error("Unable to load attempt history.");
+      if (!cached.data) {
+        toast.error("Unable to load attempt history.");
+      }
     } finally {
       setLoading(false);
     }
-  }, [params.classLabId, urlSubmissionId]);
+  }, [params.classLabId]);
+
+  // Synchronize URL submissionId or default to latest attempt when attempts change
+  useEffect(() => {
+    if (attempts.length > 0) {
+      if (urlSubmissionId && attempts.some((a) => a.id === urlSubmissionId)) {
+        const timer = setTimeout(() => {
+          setSelectedAttemptId(urlSubmissionId);
+        }, 0);
+        return () => clearTimeout(timer);
+      } else {
+        const timer = setTimeout(() => {
+          setSelectedAttemptId(attempts[attempts.length - 1].id);
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      const timer = setTimeout(() => {
+        setSelectedAttemptId(null);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [urlSubmissionId, attempts]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -206,6 +239,11 @@ export default function ClassLabAttemptsPage() {
       setDriveLink("");
       setResubmitNote("");
       setResubmitDialogOpen(false);
+
+      // Invalidate cache
+      queryCache.invalidate(`lab-details-${params.classLabId}`);
+      queryCache.invalidate("student-labs");
+
       load(); // Refresh attempts & requests
     } catch (err) {
       console.error("Failed to save resubmission request:", err);
@@ -269,7 +307,7 @@ export default function ClassLabAttemptsPage() {
               </div>
             )}
 
-            {!loading && attempts.length > 0 && (
+            {!loading && (
               <Button
                 size="sm"
                 onClick={() => setResubmitDialogOpen(true)}
@@ -277,6 +315,7 @@ export default function ClassLabAttemptsPage() {
                 title={request?.status === "pending" ? "You have a pending request" : "Request Resubmission"}
                 className="font-bold text-xs"
               >
+                <FileUp className="mr-1.5 h-3.5 w-3.5" />
                 Request Resubmit
               </Button>
             )}
@@ -339,9 +378,20 @@ export default function ClassLabAttemptsPage() {
             <p className="text-sm text-muted-foreground max-w-sm">
               You haven&apos;t submitted any code for this lab yet. Submit your code via the system to see results.
             </p>
-            <Button size="sm" onClick={() => router.push("/student/dashboard")} className="mt-2">
-              Back to Dashboard
-            </Button>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <Button
+                size="sm"
+                onClick={() => setResubmitDialogOpen(true)}
+                disabled={request?.status === "pending"}
+                title={request?.status === "pending" ? "You have a pending request" : "Request Resubmission"}
+              >
+                <FileUp className="mr-1.5 h-3.5 w-3.5" />
+                {request?.status === "pending" ? "Request Pending" : "Request Resubmit"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => router.push("/student/dashboard")}>
+                Back to Dashboard
+              </Button>
+            </div>
           </Card>
         ) : (
           /* Main Layout when loaded */
@@ -992,6 +1042,26 @@ export default function ClassLabAttemptsPage() {
                 <p className="font-bold text-red-800 dark:text-red-300">Important Note</p>
                 <p className="mt-0.5 text-xs text-red-700 dark:text-red-400 font-medium">
                   Please do not spam requests. Kindly wait for the admin to review and process your submission.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-3.5 text-sm leading-relaxed text-foreground ring-1 ring-primary/10">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <TriangleAlert className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-extrabold text-primary">Submission file requirement</p>
+                <p className="mt-0.5 text-xs text-muted-foreground font-medium">
+                  Compress your submission file and name it as{" "}
+                  <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                    Labx_MSSV
+                  </span>
+                  , for example{" "}
+                  <span className="rounded bg-background px-1.5 py-0.5 font-mono font-bold text-foreground ring-1 ring-border">
+                    Lab2_SE180123
+                  </span>
+                  .
                 </p>
               </div>
             </div>
