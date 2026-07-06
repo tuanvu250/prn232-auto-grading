@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2, FileSpreadsheet, Upload, RefreshCw, Search, Users, FolderOpen } from "lucide-react";
+import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2, FileSpreadsheet, Upload, RefreshCw, Search, Users, FolderOpen, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -517,43 +517,32 @@ export default function AdminClassLabsPage() {
 
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
-      {/* Breadcrumbs và Action Bar */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground shadow-none"
-              asChild
-            >
-              <Link href={`/admin/terms/${params.termId}/classes`}>
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-            </Button>
-            <div className="flex items-center gap-2">
-              <Link href="/admin/terms" className="hover:text-foreground transition-colors">
-                Terms
-              </Link>
-              <span className="text-muted-foreground/40">/</span>
-              <Link
-                href={`/admin/terms/${params.termId}/classes`}
-                className="hover:text-foreground transition-colors"
-              >
-                {termName || "Loading..."}
-              </Link>
-              <span className="text-muted-foreground/40">/</span>
-              <span className="font-semibold text-foreground">{className || "Loading..."}</span>
-              <span className="text-muted-foreground/40">/</span>
-              <span className="font-semibold text-foreground">Labs</span>
-            </div>
-          </div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight pl-11">
-            Labs for {className || "Loading..."}
-          </h1>
-          <p className="text-xs text-muted-foreground pl-11">
-            Manage auto-graded assignments, test configurations and deadlines.
-          </p>
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <Button
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 text-muted-foreground shadow-none hover:text-foreground"
+          asChild
+        >
+          <Link href={`/admin/terms/${params.termId}/classes`}>
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/terms" className="transition-colors hover:text-foreground">
+            Terms
+          </Link>
+          <span className="text-muted-foreground/40">/</span>
+          <Link
+            href={`/admin/terms/${params.termId}/classes`}
+            className="transition-colors hover:text-foreground"
+          >
+            {termName || "Loading..."}
+          </Link>
+          <span className="text-muted-foreground/40">/</span>
+          <span className="font-semibold text-foreground">{className || "Loading..."}</span>
+          <span className="text-muted-foreground/40">/</span>
+          <span className="font-semibold text-foreground">Labs</span>
         </div>
       </div>
 
@@ -603,14 +592,18 @@ export default function AdminClassLabsPage() {
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {classLabs.map((cl) => (
-                <Link
-                  key={cl.id}
-                  href={`/admin/terms/${params.termId}/classes/${params.classId}/labs/${cl.id}/students`}
-                >
-                  <Card className="relative group h-full space-y-3 p-5 bg-card border border-border shadow-none hover:border-primary/50 transition-all rounded-lg flex flex-col justify-between">
+              {classLabs.map((cl) => {
+                const labStudentsHref = `/admin/terms/${params.termId}/classes/${params.classId}/labs/${cl.id}/students`;
+
+                return (
+                  <Card key={cl.id} className="relative group h-full space-y-3 p-5 bg-card border border-border shadow-none hover:border-primary/50 transition-all rounded-lg flex flex-col justify-between">
+                    <Link
+                      href={labStudentsHref}
+                      className="absolute inset-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                      aria-label={`Open ${cl.lab_code} submissions`}
+                    />
                     {/* Hover Actions */}
-                    <div className="absolute right-4 top-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute right-4 top-4 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button
                         size="icon"
                         variant="ghost"
@@ -654,10 +647,18 @@ export default function AdminClassLabsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         {getDeadlineBadge(cl.deadline)}
                         {cl.drive_root_url ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                          <a
+                            href={cl.drive_root_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="relative z-10 inline-flex h-7 items-center gap-1.5 rounded-md border border-emerald-600 bg-emerald-600 px-2.5 text-xs font-bold text-white transition-colors hover:border-emerald-700 hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                            aria-label={`Open Drive folder for ${cl.lab_code}`}
+                            title={`Open Drive folder for ${cl.lab_code}`}
+                          >
                             <FolderOpen className="h-3 w-3" />
-                            Drive ready
-                          </span>
+                            Open Drive
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                             <FolderOpen className="h-3 w-3" />
@@ -667,8 +668,8 @@ export default function AdminClassLabsPage() {
                       </div>
                     </div>
                   </Card>
-                </Link>
-              ))}
+                );
+              })}
           </div>
         )}
       </div>

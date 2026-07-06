@@ -3,10 +3,9 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useCallback, useEffect, useState, Fragment } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Users, Search, CheckCircle2, XCircle, AlertCircle, FileText, Eye, History, ExternalLink, RefreshCw, TriangleAlert, Pencil, Trash2, ChevronDown, ChevronUp, FileJson, FileDown } from "lucide-react";
+import { Users, Search, CheckCircle2, XCircle, AlertCircle, FileText, Eye, History, ExternalLink, RefreshCw, TriangleAlert, Pencil, Trash2, ChevronDown, ChevronUp, FileJson, FileDown, FolderOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -22,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TablePagination } from "@/components/admin/TablePagination";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import {
   Dialog,
   DialogContent,
@@ -142,6 +142,7 @@ export default function AdminClassLabStudentsPage() {
   const [termName, setTermName] = useState("");
   const [className, setClassName] = useState("");
   const [labCode, setLabCode] = useState("");
+  const [labDriveRootUrl, setLabDriveRootUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
   // States cho Search và Filter
@@ -303,6 +304,7 @@ export default function AdminClassLabStudentsPage() {
 
       const currentLab = labsData.find((l) => l.id === params.classLabId);
       setLabCode(currentLab ? currentLab.lab_code : "Lab");
+      setLabDriveRootUrl(currentLab?.drive_root_url || "");
       setCurrentPage(1);
     } catch (err) {
       console.error("Failed to load student results:", err);
@@ -427,72 +429,58 @@ export default function AdminClassLabStudentsPage() {
 
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
-      {/* Breadcrumbs */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+      <AdminPageHeader
+        breadcrumbs={[
+          { label: "Terms", href: "/admin/terms" },
+          { label: termName || "Loading...", href: `/admin/terms/${params.termId}/classes` },
+          { label: className || "Loading...", href: `/admin/terms/${params.termId}/classes/${params.classId}/labs` },
+          { label: labCode || "Loading..." },
+          { label: "Students" },
+        ]}
+        title={`Student Results for ${labCode || "Loading..."}`}
+        description="Monitor scores, check submission attempts and control resubmission statuses."
+        backHref={`/admin/terms/${params.termId}/classes/${params.classId}/labs`}
+        actions={
+          <>
+            {labDriveRootUrl ? (
+              <Button
+                size="sm"
+                className="bg-emerald-600 text-white shadow-none hover:bg-emerald-700"
+                asChild
+              >
+                <a
+                  href={labDriveRootUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open Drive folder for ${labCode || "this lab"}`}
+                >
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                  Open Drive
+                  <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                </a>
+              </Button>
+            ) : null}
             <Button
+              size="sm"
               variant="outline"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground shadow-none"
-              asChild
+              onClick={handleExportExcel}
+              disabled={loading || isExporting || filteredResults.length === 0}
+              className="shadow-none"
             >
-              <Link href={`/admin/terms/${params.termId}/classes/${params.classId}/labs`}>
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
+              {isExporting ? (
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="mr-2 h-4 w-4" />
+              )}
+              Export Excel
             </Button>
-            <div className="flex items-center gap-2">
-              <Link href="/admin/terms" className="hover:text-foreground transition-colors">
-                Terms
-              </Link>
-              <span className="text-muted-foreground/40">/</span>
-              <Link
-                href={`/admin/terms/${params.termId}/classes`}
-                className="hover:text-foreground transition-colors"
-              >
-                {termName || "Loading..."}
-              </Link>
-              <span className="text-muted-foreground/40">/</span>
-              <Link
-                href={`/admin/terms/${params.termId}/classes/${params.classId}/labs`}
-                className="hover:text-foreground transition-colors"
-              >
-                {className || "Loading..."}
-              </Link>
-              <span className="text-muted-foreground/40">/</span>
-              <span className="font-semibold text-foreground">{labCode || "Loading..."}</span>
-              <span className="text-muted-foreground/40">/</span>
-              <span className="font-semibold text-foreground">Students</span>
-            </div>
-          </div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight pl-11">
-            Student Results for {labCode || "Loading..."}
-          </h1>
-          <p className="text-xs text-muted-foreground pl-11">
-            Monitor scores, check submission attempts and control resubmission statuses.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 self-start sm:self-center">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleExportExcel}
-            disabled={loading || isExporting || filteredResults.length === 0}
-            className="shadow-none"
-          >
-            {isExporting ? (
-              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <FileDown className="mr-2 h-4 w-4" />
-            )}
-            Export Excel
-          </Button>
-          <Button size="sm" variant="outline" onClick={load} className="shadow-none">
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+            <Button size="sm" variant="outline" onClick={load} className="shadow-none">
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       {/* Thẻ thống kê tổng quan */}
       {loading ? (
