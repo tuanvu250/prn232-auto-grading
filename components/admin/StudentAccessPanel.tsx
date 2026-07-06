@@ -80,9 +80,9 @@ export function StudentAccessPanel({
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         {/* Inline Metrics */}
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-semibold text-muted-foreground">Student Access:</span>
+          <span className="font-semibold text-muted-foreground">Students:</span>
           <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1">
-            <span className="text-xs text-muted-foreground">Emails</span>
+            <span className="text-xs text-muted-foreground">Total</span>
             <span className="font-extrabold text-foreground">{summary.total}</span>
           </div>
           <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1">
@@ -112,8 +112,8 @@ export function StudentAccessPanel({
           <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search email, student ID or class"
-            aria-label="Search student access"
+            placeholder="Search student ID, name, email or class"
+            aria-label="Search students"
             className="max-w-md"
           />
 
@@ -154,8 +154,9 @@ export function StudentAccessPanel({
           <Table className="min-w-[760px]">
             <TableHeader className="bg-muted/50">
               <TableRow className="hover:bg-transparent">
-                <TableHead>Email</TableHead>
                 <TableHead className="w-[140px]">MSSV</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
                 <TableHead className="w-[140px]">Class</TableHead>
                 <TableHead className="w-[170px] text-right">Action</TableHead>
               </TableRow>
@@ -165,13 +166,16 @@ export function StudentAccessPanel({
                 Array.from({ length: 5 }).map((_, idx) => (
                   <TableRow key={idx}>
                     <TableCell>
+                      <Skeleton className="h-4 w-20" />
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-2">
                         <Skeleton className="h-4 w-4 rounded-full" />
-                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-4 w-40" />
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-4 w-48" />
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-4 w-16" />
@@ -186,8 +190,8 @@ export function StudentAccessPanel({
                 ))
               ) : allowedEmails.length === 0 ? (
                 <EmptyTableRow
-                  colSpan={4}
-                  label="No student access records match the current filters."
+                  colSpan={5}
+                  label="No student records match the current filters."
                 />
               ) : (
                 allowedEmails.map((item, index) => (
@@ -196,13 +200,14 @@ export function StudentAccessPanel({
                     className="motion-list-item"
                     style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
                   >
+                    <TableCell className="font-mono text-xs font-semibold">{item.student_id}</TableCell>
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
                         <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate font-medium">{item.email}</span>
+                        <span className="truncate font-medium">{item.name || "—"}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{item.student_id}</TableCell>
+                    <TableCell className="text-muted-foreground">{item.email}</TableCell>
                     <TableCell>{item.class_name}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
@@ -227,13 +232,15 @@ export function StudentAccessPanel({
             </TableBody>
           </Table>
         </div>
+        <div className="px-4 pb-4">
+          <TablePagination
+            pagination={pagination}
+            loading={loading}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
+        </div>
       </div>
-      <TablePagination
-        pagination={pagination}
-        loading={loading}
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-      />
     </section>
   );
 }

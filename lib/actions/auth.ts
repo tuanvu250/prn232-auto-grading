@@ -23,24 +23,29 @@ export async function googleLoginAction(email: string) {
       };
     }
 
-    const { data, error } = await supabaseServer
-      .rpc("check_email_whitelist", { email_to_check: normalizedEmail })
-      .maybeSingle<{ student_id: string; class_name: string }>();
+    const { data: student, error: studentError } = await supabaseServer
+      .from("students")
+      .select("student_code, class_students(classes(name))")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (studentError) {
+      return { success: false, error: studentError.message };
     }
 
-    if (!data) {
+    if (!student) {
       return { success: false, error: "Email is not allowed" };
     }
+
+    const classStudents = student.class_students as any[];
+    const className = classStudents?.[0]?.classes?.name || "";
 
     return {
       success: true,
       data: {
         role: ROLE_STUDENT,
-        studentId: data.student_id,
-        className: data.class_name,
+        studentId: student.student_code,
+        className,
       },
     };
   } catch (err) {

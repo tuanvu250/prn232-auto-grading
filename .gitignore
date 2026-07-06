@@ -47,3 +47,5 @@ next-env.d.ts
 .gemini/
 .fk-skills/
 .agents/
+.ck.json
+.mcp.json

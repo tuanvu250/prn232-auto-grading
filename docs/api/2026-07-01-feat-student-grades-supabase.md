@@ -2,6 +2,13 @@
 
 > Branch: `tvu`
 > Date: 2026-07-01
+>
+> **Superseded 2026-07-04**: this document describes queries against the legacy
+> flat `submissions` table (one row per lab, overwritten on regrade). The
+> normalized schema (`docs/api/2026-07-04-normalize-erd-schema.sql`) replaces it
+> with `class_lab_submissions`-style rows keyed by `attempt_no` — see
+> `lib/actions/erd-student.ts` for the current query pattern. Kept for history
+> until the legacy tables are archived (Phase 7).
 
 Tài liệu này hướng dẫn Frontend cách cài đặt SDK và thực hiện truy vấn trực tiếp bảng `submissions` trên Supabase để hiển thị kết quả chấm bài của sinh viên.
 

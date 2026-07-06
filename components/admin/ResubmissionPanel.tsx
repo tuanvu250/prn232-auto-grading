@@ -413,13 +413,15 @@ export function ResubmissionPanel({
             </TableBody>
           </Table>
         </div>
+        <div className="px-4 pb-4">
+          <TablePagination
+            pagination={pagination}
+            loading={loading}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
+        </div>
       </div>
-      <TablePagination
-        pagination={pagination}
-        loading={loading}
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-      />
     </section>
   );
 }
