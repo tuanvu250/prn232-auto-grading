@@ -49,7 +49,7 @@ export async function getClassLabsForClassAction(classId: string): Promise<Class
 
   const { data, error } = await supabaseServer
     .from("class_labs")
-    .select("id, class_id, lab_id, deadline, labs(code, title)")
+    .select("id, class_id, lab_id, deadline, drive_root_url, labs(code, title)")
     .eq("class_id", classId)
     .order("id");
 
@@ -60,6 +60,7 @@ export async function getClassLabsForClassAction(classId: string): Promise<Class
     class_id: string;
     lab_id: string;
     deadline: string | null;
+    drive_root_url: string | null;
     labs: { code: string; title: string | null } | null;
   }
 
@@ -68,6 +69,7 @@ export async function getClassLabsForClassAction(classId: string): Promise<Class
     class_id: row.class_id,
     lab_id: row.lab_id,
     deadline: row.deadline,
+    drive_root_url: row.drive_root_url ?? null,
     lab_code: row.labs?.code ?? "",
     lab_title: row.labs?.title ?? null,
   }));
@@ -153,13 +155,19 @@ export async function createLabAction(code: string, title: string | null) {
 export async function assignLabToClassAction(
   classId: string,
   labId: string,
-  deadline: string | null
+  deadline: string | null,
+  driveRootUrl: string | null = null
 ) {
   await requireAdmin();
 
   const { data, error } = await supabaseServer
     .from("class_labs")
-    .insert({ class_id: classId, lab_id: labId, deadline })
+    .insert({
+      class_id: classId,
+      lab_id: labId,
+      deadline,
+      drive_root_url: driveRootUrl?.trim() || null,
+    })
     .select("id, class_id, lab_id, deadline")
     .single();
 
@@ -169,13 +177,19 @@ export async function assignLabToClassAction(
 
 export async function updateClassLabDeadlineAction(
   classLabId: string,
-  deadline: string | null
+  deadline: string | null,
+  driveRootUrl?: string | null
 ) {
   await requireAdmin();
 
+  const payload: { deadline: string | null; drive_root_url?: string | null } = { deadline };
+  if (driveRootUrl !== undefined) {
+    payload.drive_root_url = driveRootUrl?.trim() || null;
+  }
+
   const { error } = await supabaseServer
     .from("class_labs")
-    .update({ deadline })
+    .update(payload)
     .eq("id", classLabId);
 
   if (error) throw new Error(error.message);
@@ -222,6 +236,22 @@ export async function getAdminStudentSubmissionsAction(
     .select("*")
     .eq("class_student_id", classStudentId)
     .eq("class_lab_id", classLabId)
+    .order("attempt_no", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getAdminClassLabSubmissionsAction(
+  classLabId: string
+): Promise<ClassLabSubmission[]> {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("class_lab_submissions")
+    .select("*")
+    .eq("class_lab_id", classLabId)
+    .order("class_student_id", { ascending: true })
     .order("attempt_no", { ascending: false });
 
   if (error) throw new Error(error.message);

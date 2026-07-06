@@ -4,11 +4,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
-import { LogOut, GraduationCap, FileWarning } from "lucide-react";
+import { LogOut, GraduationCap, FileWarning, FolderOpen, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,6 +25,19 @@ function statusBadge(status: string | null) {
   if (status === "failed")
     return <Badge className="border-none bg-red-600 text-white">Failed</Badge>;
   return <Badge className="border-none bg-amber-500 text-white">Grading</Badge>;
+}
+
+function deadlineLabel(deadline: string | null) {
+  if (!deadline) return "Late request open";
+  const date = new Date(deadline);
+  if (!Number.isFinite(date.getTime())) return "Deadline configured";
+  const formatted = date.toLocaleString("vi-VN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return date.getTime() > Date.now() ? `Open until ${formatted}` : `Closed ${formatted}`;
 }
 
 export default function StudentDashboardPage() {
@@ -158,8 +170,19 @@ export default function StudentDashboardPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {labs.map((lab) => (
-              <Link key={lab.class_lab_id} href={`/student/labs/${lab.class_lab_id}`}>
-                <Card className="h-full space-y-3 p-4 transition-colors hover:border-primary/40">
+              <Card
+                key={lab.class_lab_id}
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push(`/student/labs/${lab.class_lab_id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    router.push(`/student/labs/${lab.class_lab_id}`);
+                  }
+                }}
+                className="h-full cursor-pointer space-y-3 p-4 transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-foreground">{lab.lab_code}</p>
@@ -178,8 +201,24 @@ export default function StudentDashboardPage() {
                     </span>
                     <span>{lab.attempt_count} attempt(s)</span>
                   </div>
-                </Card>
-              </Link>
+                  <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-2 text-xs text-muted-foreground">
+                    <span className="truncate">{deadlineLabel(lab.deadline)}</span>
+                    {lab.drive_root_url ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          window.open(lab.drive_root_url || "", "_blank", "noopener,noreferrer");
+                        }}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 font-semibold text-foreground hover:border-primary/40 hover:text-primary"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        Drive
+                        <ExternalLink className="h-3 w-3" />
+                      </button>
+                    ) : null}
+                  </div>
+              </Card>
             ))}
           </div>
         )}

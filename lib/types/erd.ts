@@ -22,6 +22,7 @@ export interface ClassLab {
   class_id: string;
   lab_id: string;
   deadline: string | null;
+  drive_root_url: string | null;
   lab_code: string;
   lab_title: string | null;
 }
@@ -99,13 +100,15 @@ export interface ClassLabSubmission {
 }
 
 export type ResubmissionRequestStatus = "pending" | "approved" | "rejected" | "completed";
+export type SubmissionRequestType = "late" | "resubmit";
 
 export interface ResubmissionRequestV2 {
   id: string;
   class_student_id: string;
   class_lab_id: string;
-  submission_id: string;
+  submission_id: string | null;
   created_submission_id: string | null;
+  request_type: SubmissionRequestType;
   drive_link: string;
   note: string | null;
   admin_note: string | null;
@@ -135,6 +138,7 @@ export interface StudentClassLabOverview {
   lab_code: string;
   lab_title: string | null;
   deadline: string | null;
+  drive_root_url: string | null;
   attempt_count: number;
   latest_attempt_no: number | null;
   latest_score: number | null;

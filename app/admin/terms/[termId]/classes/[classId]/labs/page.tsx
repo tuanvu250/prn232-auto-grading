@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2, FileSpreadsheet, Upload, RefreshCw, Search, Users } from "lucide-react";
+import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2, FileSpreadsheet, Upload, RefreshCw, Search, Users, FolderOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -211,12 +211,14 @@ export default function AdminClassLabsPage() {
   const [newLabCode, setNewLabCode] = useState("");
   const [newLabTitle, setNewLabTitle] = useState("");
   const [deadline, setDeadline] = useState("");
+  const [driveRootUrl, setDriveRootUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
 
   // States cho Edit Lab (ClassLab)
   const [editClassLab, setEditClassLab] = useState<ClassLab | null>(null);
   const [editDeadline, setEditDeadline] = useState("");
+  const [editDriveRootUrl, setEditDriveRootUrl] = useState("");
   const [editDeadlineOpen, setEditDeadlineOpen] = useState(false);
   const [editPopoverOpen, setEditPopoverOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -250,6 +252,7 @@ export default function AdminClassLabsPage() {
     e.stopPropagation();
     setEditClassLab(cl);
     setEditDeadline(cl.deadline || "");
+    setEditDriveRootUrl(cl.drive_root_url || "");
     setEditDeadlineOpen(true);
   }, []);
 
@@ -265,8 +268,8 @@ export default function AdminClassLabsPage() {
     if (!editClassLab) return;
     setUpdating(true);
     try {
-      await updateClassLabDeadlineAction(editClassLab.id, editDeadline || null);
-      toast.success("Deadline updated.");
+      await updateClassLabDeadlineAction(editClassLab.id, editDeadline || null, editDriveRootUrl || null);
+      toast.success("Lab submission settings updated.");
       setEditDeadlineOpen(false);
       load();
     } catch (err) {
@@ -463,13 +466,14 @@ export default function AdminClassLabsPage() {
         const created = await createLabAction(newLabCode, newLabTitle || null);
         labId = created.id;
       }
-      await assignLabToClassAction(params.classId, labId, deadline || null);
+      await assignLabToClassAction(params.classId, labId, deadline || null, driveRootUrl || null);
       toast.success("Lab assigned to class.");
       setDialogOpen(false);
       setExistingLabId("");
       setNewLabCode("");
       setNewLabTitle("");
       setDeadline("");
+      setDriveRootUrl("");
       load();
     } catch (err) {
       console.error("Failed to assign lab:", err);
@@ -647,7 +651,20 @@ export default function AdminClassLabsPage() {
                       )}
                     </div>
                     <div className="pt-2 border-t border-border/40 pl-9">
-                      {getDeadlineBadge(cl.deadline)}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {getDeadlineBadge(cl.deadline)}
+                        {cl.drive_root_url ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                            <FolderOpen className="h-3 w-3" />
+                            Drive ready
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            <FolderOpen className="h-3 w-3" />
+                            No Drive
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 </Link>
@@ -1149,6 +1166,20 @@ export default function AdminClassLabsPage() {
                 </PopoverContent>
               </Popover>
             </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Drive root link
+              </label>
+              <Input
+                placeholder="https://drive.google.com/drive/folders/..."
+                value={driveRootUrl}
+                onChange={(e) => setDriveRootUrl(e.target.value)}
+                className="shadow-none border-border focus-visible:ring-primary"
+              />
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Students will see this folder while the lab is open. After the deadline, requests must include their own Drive link.
+              </p>
+            </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-border/40">
             <Button
@@ -1178,73 +1209,86 @@ export default function AdminClassLabsPage() {
           <DialogHeader>
             <DialogTitle className="text-base font-bold">Edit deadline: {editClassLab?.lab_code}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-1.5 py-4">
-            <label className="text-xs font-semibold text-muted-foreground block">
-              Deadline (optional)
-            </label>
-            <Popover open={editPopoverOpen} onOpenChange={setEditPopoverOpen}>
-              <div className="relative">
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal pr-10 shadow-none border-border focus:ring-primary",
-                      !editDeadline && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4 opacity-50" />
-                    <span className="truncate">
-                      {editDeadline
-                        ? (() => {
-                            try {
-                              const d = new Date(editDeadline);
-                              return d.toLocaleDateString("vi-VN", {
-                                year: "numeric",
-                                month: "2-digit",
-                                day: "2-digit",
-                              });
-                            } catch {
-                              return editDeadline;
-                            }
-                          })()
-                        : "Pick a date"}
-                    </span>
-                  </Button>
-                </PopoverTrigger>
-                {editDeadline && (
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-sm hover:bg-muted text-muted-foreground hover:text-foreground z-10"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditDeadline("");
-                      setEditPopoverOpen(false);
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground block">
+                Deadline (optional)
+              </label>
+              <Popover open={editPopoverOpen} onOpenChange={setEditPopoverOpen}>
+                <div className="relative">
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal pr-10 shadow-none border-border focus:ring-primary",
+                        !editDeadline && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4 opacity-50" />
+                      <span className="truncate">
+                        {editDeadline
+                          ? (() => {
+                              try {
+                                const d = new Date(editDeadline);
+                                return d.toLocaleDateString("vi-VN", {
+                                  year: "numeric",
+                                  month: "2-digit",
+                                  day: "2-digit",
+                                });
+                              } catch {
+                                return editDeadline;
+                              }
+                            })()
+                          : "Pick a date"}
+                      </span>
+                    </Button>
+                  </PopoverTrigger>
+                  {editDeadline && (
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-sm hover:bg-muted text-muted-foreground hover:text-foreground z-10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditDeadline("");
+                        setEditPopoverOpen(false);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                      <span className="sr-only">Clear</span>
+                    </button>
+                  )}
+                </div>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={editDeadline ? new Date(editDeadline) : undefined}
+                    onSelect={(d) => {
+                      if (!d) {
+                        setEditDeadline("");
+                      } else {
+                        const year = d.getFullYear();
+                        const month = String(d.getMonth() + 1).padStart(2, "0");
+                        const day = String(d.getDate()).padStart(2, "0");
+                        setEditDeadline(`${year}-${month}-${day}T23:59:00`);
+                        setEditPopoverOpen(false);
+                      }
                     }}
-                  >
-                    <X className="h-3 w-3" />
-                    <span className="sr-only">Clear</span>
-                  </button>
-                )}
-              </div>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={editDeadline ? new Date(editDeadline) : undefined}
-                  onSelect={(d) => {
-                    if (!d) {
-                      setEditDeadline("");
-                    } else {
-                      const year = d.getFullYear();
-                      const month = String(d.getMonth() + 1).padStart(2, "0");
-                      const day = String(d.getDate()).padStart(2, "0");
-                      setEditDeadline(`${year}-${month}-${day}T23:59:00`);
-                      setEditPopoverOpen(false);
-                    }
-                  }}
-                  defaultMonth={editDeadline ? new Date(editDeadline) : undefined}
-                />
-              </PopoverContent>
-            </Popover>
+                    defaultMonth={editDeadline ? new Date(editDeadline) : undefined}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground block">
+                Drive root link
+              </label>
+              <Input
+                placeholder="https://drive.google.com/drive/folders/..."
+                value={editDriveRootUrl}
+                onChange={(e) => setEditDriveRootUrl(e.target.value)}
+                className="shadow-none border-border focus-visible:ring-primary"
+              />
+            </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-border/40">
             <Button

@@ -94,6 +94,7 @@ describe("getClassLabsForClassAction", () => {
             class_id: "c-1",
             lab_id: "l-1",
             deadline: null,
+            drive_root_url: "https://drive.google.com/drive/folders/root",
             labs: { code: "LAB01", title: "Intro" },
           },
         ],
@@ -108,6 +109,7 @@ describe("getClassLabsForClassAction", () => {
         class_id: "c-1",
         lab_id: "l-1",
         deadline: null,
+        drive_root_url: "https://drive.google.com/drive/folders/root",
         lab_code: "LAB01",
         lab_title: "Intro",
       },
@@ -119,7 +121,7 @@ describe("getClassLabsForClassAction", () => {
     userIsAdminMock.mockReturnValue(true);
     fromQueue.push(
       makeBuilder({
-        data: [{ id: "cl-1", class_id: "c-1", lab_id: "l-1", deadline: null, labs: null }],
+        data: [{ id: "cl-1", class_id: "c-1", lab_id: "l-1", deadline: null, drive_root_url: null, labs: null }],
         error: null,
       })
     );

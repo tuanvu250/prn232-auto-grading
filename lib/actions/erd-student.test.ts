@@ -149,6 +149,7 @@ describe("createResubmissionRequestAction", () => {
     // rate limit checks: no last request, count 0
     fromQueue.push(makeBuilder({ data: null, error: null }));
     fromQueue.push(makeBuilder({ data: null, error: null, count: 0 }));
+    fromQueue.push(makeBuilder({ data: { deadline: null }, error: null }));
     // no prior submission -> should fail on "haven't submitted" rather than "invalid link"
     fromQueue.push(makeBuilder({ data: null, error: null }));
 
@@ -170,6 +171,7 @@ describe("createResubmissionRequestAction", () => {
     queueHappyEnrollmentLookup();
     fromQueue.push(makeBuilder({ data: null, error: null })); // rate limit: last request
     fromQueue.push(makeBuilder({ data: null, error: null, count: 0 })); // rate limit: count
+    fromQueue.push(makeBuilder({ data: { deadline: null }, error: null })); // class lab lookup
     fromQueue.push(makeBuilder({ data: null, error: null })); // submission lookup -> none
 
     const result = await createResubmissionRequestAction(
@@ -190,6 +192,7 @@ describe("createResubmissionRequestAction", () => {
     queueHappyEnrollmentLookup();
     fromQueue.push(makeBuilder({ data: null, error: null })); // rate limit: last request
     fromQueue.push(makeBuilder({ data: null, error: null, count: 0 })); // rate limit: count
+    fromQueue.push(makeBuilder({ data: { deadline: null }, error: null }));
     fromQueue.push(
       makeBuilder({ data: { id: "sub-1", class_lab_id: "class-lab-1" }, error: null })
     ); // submission lookup -> found
@@ -217,6 +220,7 @@ describe("createResubmissionRequestAction", () => {
     queueHappyEnrollmentLookup();
     fromQueue.push(makeBuilder({ data: null, error: null }));
     fromQueue.push(makeBuilder({ data: null, error: null, count: 0 }));
+    fromQueue.push(makeBuilder({ data: { deadline: null }, error: null }));
     fromQueue.push(
       makeBuilder({ data: { id: "sub-1", class_lab_id: "class-lab-1" }, error: null })
     );
@@ -233,6 +237,7 @@ describe("createResubmissionRequestAction", () => {
     queueHappyEnrollmentLookup();
     fromQueue.push(makeBuilder({ data: null, error: null }));
     fromQueue.push(makeBuilder({ data: null, error: null, count: 0 }));
+    fromQueue.push(makeBuilder({ data: { deadline: null }, error: null }));
     fromQueue.push(
       makeBuilder({ data: { id: "sub-1", class_lab_id: "class-lab-1" }, error: null })
     );

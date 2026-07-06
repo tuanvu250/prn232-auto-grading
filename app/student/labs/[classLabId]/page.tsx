@@ -18,6 +18,8 @@ import {
   Calendar,
   FileUp,
   Layers,
+  ExternalLink,
+  FolderOpen,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -44,10 +46,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getClassLabAttemptsAction,
+  getClassLabSubmissionAccessAction,
   getResubmissionRequestForClassLabAction,
   createResubmissionRequestAction,
 } from "@/lib/actions/erd-student";
-import type { ClassLabSubmission, ResubmissionRequestV2 } from "@/lib/types/erd";
+import type { ClassLabSubmission, ResubmissionRequestV2, StudentClassLabOverview } from "@/lib/types/erd";
 
 function statusBadge(status: string) {
   if (status === "passed")
@@ -120,6 +123,7 @@ export default function ClassLabAttemptsPage() {
 
   const [user, setUser] = useState<UserPayload | null>(null);
   const [attempts, setAttempts] = useState<ClassLabSubmission[]>([]);
+  const [labAccess, setLabAccess] = useState<Pick<StudentClassLabOverview, "class_lab_id" | "lab_code" | "lab_title" | "deadline" | "drive_root_url"> | null>(null);
   const [request, setRequest] = useState<ResubmissionRequestV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
@@ -146,11 +150,12 @@ export default function ClassLabAttemptsPage() {
 
   const load = useCallback(async () => {
     const cacheKey = `lab-details-${params.classLabId}`;
-    const cached = queryCache.get<{ attempts: ClassLabSubmission[]; request: ResubmissionRequestV2 | null }>(cacheKey, 30000); // 30 seconds stale time
+    const cached = queryCache.get<{ attempts: ClassLabSubmission[]; request: ResubmissionRequestV2 | null; labAccess: Pick<StudentClassLabOverview, "class_lab_id" | "lab_code" | "lab_title" | "deadline" | "drive_root_url"> | null }>(cacheKey, 30000); // 30 seconds stale time
 
     if (cached.data) {
       setAttempts(cached.data.attempts);
       setRequest(cached.data.request);
+      setLabAccess(cached.data.labAccess);
       setLoading(false);
       if (!cached.isStale) {
         return;
@@ -160,16 +165,18 @@ export default function ClassLabAttemptsPage() {
     }
 
     try {
-      const [attemptRows, requestRow] = await Promise.all([
+      const [attemptRows, requestRow, accessRow] = await Promise.all([
         getClassLabAttemptsAction(params.classLabId),
         getResubmissionRequestForClassLabAction(params.classLabId),
+        getClassLabSubmissionAccessAction(params.classLabId),
       ]);
 
       setAttempts(attemptRows);
       setRequest(requestRow);
+      setLabAccess(accessRow);
 
       // Update cache
-      queryCache.set(cacheKey, { attempts: attemptRows, request: requestRow });
+      queryCache.set(cacheKey, { attempts: attemptRows, request: requestRow, labAccess: accessRow });
     } catch (err) {
       console.error("Failed to load attempt history:", err);
       if (!cached.data) {
@@ -219,6 +226,15 @@ export default function ClassLabAttemptsPage() {
     setExpandedTests((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
+  const hasAttempts = attempts.length > 0;
+  const deadlineTime = labAccess?.deadline ? new Date(labAccess.deadline).getTime() : null;
+  const hasDeadline = deadlineTime !== null && Number.isFinite(deadlineTime);
+  const isBeforeDeadline = hasDeadline ? deadlineTime > Date.now() : false;
+  const requestType = hasAttempts ? "resubmit" : "late";
+  const canRequestLate = !hasAttempts && (!hasDeadline || !isBeforeDeadline);
+  const canOpenRequest = hasAttempts || canRequestLate;
+  const requestLabel = hasAttempts ? "Request Resubmit" : "Request Late Submission";
+
   const handleSaveResubmit = async () => {
     if (!driveLink.trim()) {
       toast.error("Please enter a Google Drive link.");
@@ -229,13 +245,14 @@ export default function ClassLabAttemptsPage() {
       const result = await createResubmissionRequestAction(
         params.classLabId,
         driveLink,
-        resubmitNote
+        resubmitNote,
+        requestType
       );
       if (!result.success) {
         toast.error(result.error || "Unable to submit the resubmission request.");
         return;
       }
-      toast.success("Resubmission request sent. Admins will be notified.");
+      toast.success(`${requestType === "late" ? "Late submission" : "Resubmission"} request sent. Admins will be notified.`);
       setDriveLink("");
       setResubmitNote("");
       setResubmitDialogOpen(false);
@@ -311,12 +328,12 @@ export default function ClassLabAttemptsPage() {
               <Button
                 size="sm"
                 onClick={() => setResubmitDialogOpen(true)}
-                disabled={request?.status === "pending"}
-                title={request?.status === "pending" ? "You have a pending request" : "Request Resubmission"}
+                disabled={request?.status === "pending" || !canOpenRequest}
+                title={request?.status === "pending" ? "You have a pending request" : requestLabel}
                 className="font-bold text-xs"
               >
                 <FileUp className="mr-1.5 h-3.5 w-3.5" />
-                Request Resubmit
+                {requestLabel}
               </Button>
             )}
           </div>
@@ -376,17 +393,28 @@ export default function ClassLabAttemptsPage() {
             <Layers className="h-10 w-10 text-muted-foreground" />
             <h3 className="font-bold text-lg text-foreground">No submissions found</h3>
             <p className="text-sm text-muted-foreground max-w-sm">
-              You haven&apos;t submitted any code for this lab yet. Submit your code via the system to see results.
+              {isBeforeDeadline
+                ? "Submit your code in the class Drive folder before the deadline. The grader will sync your result after scanning the folder."
+                : "The direct submission window is closed. Send a late submission request with your Drive link for admin review."}
             </p>
+            {labAccess?.drive_root_url ? (
+              <Button size="sm" variant="outline" asChild>
+                <a href={labAccess.drive_root_url} target="_blank" rel="noreferrer">
+                  <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                  Open Class Drive Folder
+                  <ExternalLink className="ml-1.5 h-3 w-3" />
+                </a>
+              </Button>
+            ) : null}
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <Button
                 size="sm"
                 onClick={() => setResubmitDialogOpen(true)}
-                disabled={request?.status === "pending"}
-                title={request?.status === "pending" ? "You have a pending request" : "Request Resubmission"}
+                disabled={request?.status === "pending" || !canRequestLate}
+                title={request?.status === "pending" ? "You have a pending request" : requestLabel}
               >
                 <FileUp className="mr-1.5 h-3.5 w-3.5" />
-                {request?.status === "pending" ? "Request Pending" : "Request Resubmit"}
+                {request?.status === "pending" ? "Request Pending" : requestLabel}
               </Button>
               <Button size="sm" variant="outline" onClick={() => router.push("/student/dashboard")}>
                 Back to Dashboard
@@ -398,6 +426,27 @@ export default function ClassLabAttemptsPage() {
           <div className="grid gap-6 lg:grid-cols-4">
             {/* Left Column: selected attempt details */}
             <div className="lg:col-span-3 lg:order-last space-y-6 min-w-0">
+              {labAccess?.drive_root_url ? (
+                <Card className="flex flex-col gap-3 border-border p-4 shadow-none sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-bold text-foreground">Class Drive Folder</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {isBeforeDeadline
+                        ? "The submission window is open. Keep your file name in the required Labx_MSSV format."
+                        : "The deadline has passed. New work should go through a late/resubmit request."}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" asChild>
+                    <a href={labAccess.drive_root_url} target="_blank" rel="noreferrer">
+                      Open Drive
+                      <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+                    </a>
+                  </Button>
+                </Card>
+              ) : null}
               {/* Mobile History Carousel (Hidden on Desktop) */}
               <div className="lg:hidden space-y-2">
                 <h3 className="text-xs font-bold text-foreground uppercase tracking-wider px-1">
@@ -465,7 +514,9 @@ export default function ClassLabAttemptsPage() {
                   <div className="border border-border/80 rounded-lg p-3 bg-muted/30 flex items-center justify-between gap-4 mt-2">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-foreground">Resubmit Request</span>
+                        <span className="text-xs font-bold text-foreground">
+                          {request.request_type === "late" ? "Late Request" : "Resubmit Request"}
+                        </span>
                         <Badge
                           className={`text-[9px] uppercase font-bold px-1.5 py-0.5 border-none ${
                             request.status === "pending"
@@ -984,7 +1035,9 @@ export default function ClassLabAttemptsPage() {
               {request ? (
                 <div className="border border-border/80 rounded-lg p-3 bg-muted/30 space-y-2 mt-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-foreground">Resubmit Request</span>
+                    <span className="text-xs font-bold text-foreground">
+                      {request.request_type === "late" ? "Late Request" : "Resubmit Request"}
+                    </span>
                     <Badge
                       className={`text-[9px] uppercase font-bold px-1.5 py-0.5 border-none ${
                         request.status === "pending"
@@ -1027,9 +1080,11 @@ export default function ClassLabAttemptsPage() {
       >
         <DialogContent className="font-quicksand">
           <DialogHeader>
-            <DialogTitle>Request Resubmission</DialogTitle>
+            <DialogTitle>{requestType === "late" ? "Request Late Submission" : "Request Resubmission"}</DialogTitle>
             <DialogDescription>
-              Submit a Google Drive link to request a resubmission for this lab. You may request a resubmission up to 3 times per lab.
+              {requestType === "late"
+                ? "Submit a Google Drive link to request a late first submission for this lab."
+                : "Submit a Google Drive link to request a resubmission for this lab. You may request a resubmission up to 3 times per lab."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1072,7 +1127,7 @@ export default function ClassLabAttemptsPage() {
                 value={driveLink}
                 onChange={(event) => setDriveLink(event.target.value)}
                 placeholder="https://drive.google.com/..."
-                aria-label="Google Drive resubmission link"
+                aria-label="Google Drive submission request link"
               />
             </div>
 
@@ -1081,7 +1136,7 @@ export default function ClassLabAttemptsPage() {
               <Textarea
                 value={resubmitNote}
                 onChange={(event) => setResubmitNote(event.target.value)}
-                placeholder="Message or explanation for admin..."
+                placeholder={requestType === "late" ? "Explain why this submission is late..." : "Message or explanation for admin..."}
                 className="min-h-[96px]"
                 aria-label="Resubmission note"
               />
@@ -1104,7 +1159,7 @@ export default function ClassLabAttemptsPage() {
               onClick={handleSaveResubmit}
               disabled={!driveLink.trim() || submittingResubmit}
             >
-              Submit Request
+              {requestType === "late" ? "Submit Late Request" : "Submit Request"}
             </Button>
           </DialogFooter>
         </DialogContent>

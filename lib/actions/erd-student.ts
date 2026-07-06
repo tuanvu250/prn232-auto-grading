@@ -111,6 +111,41 @@ export async function getResubmissionRequestForClassLabAction(
   return data ?? null;
 }
 
+export async function getClassLabSubmissionAccessAction(
+  classLabId: string
+): Promise<Pick<StudentClassLabOverview, "class_lab_id" | "lab_code" | "lab_title" | "deadline" | "drive_root_url"> | null> {
+  const classStudentId = await getCurrentClassStudentIdAction();
+  if (!classStudentId) return null;
+
+  const { data, error } = await supabaseServer
+    .from("class_labs")
+    .select("id, class_id, deadline, drive_root_url, labs(code, title)")
+    .eq("id", classLabId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+
+  const { data: enrollment, error: enrollmentError } = await supabaseServer
+    .from("class_students")
+    .select("id")
+    .eq("id", classStudentId)
+    .eq("class_id", data.class_id)
+    .maybeSingle();
+
+  if (enrollmentError) throw new Error(enrollmentError.message);
+  if (!enrollment) return null;
+
+  const lab = Array.isArray(data.labs) ? data.labs[0] : data.labs;
+  return {
+    class_lab_id: data.id,
+    lab_code: lab?.code ?? "",
+    lab_title: lab?.title ?? null,
+    deadline: data.deadline ?? null,
+    drive_root_url: data.drive_root_url ?? null,
+  };
+}
+
 function isDriveLink(url: string) {
   try {
     const parsed = new URL(url.trim());
@@ -201,7 +236,8 @@ export interface CreateResubmissionResult {
 export async function createResubmissionRequestAction(
   classLabId: string,
   driveLink: string,
-  note: string | null
+  note: string | null,
+  requestType: "late" | "resubmit" = "resubmit"
 ): Promise<CreateResubmissionResult> {
   const user = await requireStudentUser();
   const classStudentId = await getCurrentClassStudentIdAction();
@@ -217,6 +253,15 @@ export async function createResubmissionRequestAction(
     return { success: false, error: rateLimit.error };
   }
 
+  const { data: classLab, error: classLabError } = await supabaseServer
+    .from("class_labs")
+    .select("deadline")
+    .eq("id", classLabId)
+    .maybeSingle();
+
+  if (classLabError) throw new Error(classLabError.message);
+  if (!classLab) return { success: false, error: "Lab assignment not found" };
+
   const { data: submission, error: submissionError } = await supabaseServer
     .from("class_lab_submissions")
     .select("id, class_lab_id")
@@ -227,16 +272,29 @@ export async function createResubmissionRequestAction(
     .maybeSingle();
 
   if (submissionError) throw new Error(submissionError.message);
-  if (!submission) {
+  if (requestType === "resubmit" && !submission) {
     return { success: false, error: "You haven't submitted this lab yet" };
+  }
+  if (requestType === "late" && submission) {
+    return {
+      success: false,
+      error: "You already have a submission. Please request a resubmission instead.",
+    };
+  }
+  if (requestType === "late" && classLab.deadline) {
+    const deadlineTime = new Date(classLab.deadline).getTime();
+    if (Number.isFinite(deadlineTime) && deadlineTime > Date.now()) {
+      return { success: false, error: "Late submission requests open after the deadline." };
+    }
   }
 
   const { error: rpcError } = await supabaseServer.rpc("create_resubmission_request", {
     p_class_student_id: classStudentId,
-    p_class_lab_id: submission.class_lab_id,
-    p_submission_id: submission.id,
+    p_class_lab_id: submission?.class_lab_id ?? classLabId,
+    p_submission_id: submission?.id ?? null,
     p_drive_link: trimmedLink,
     p_note: note?.trim() || null,
+    p_request_type: requestType,
   });
 
   if (rpcError) {
@@ -246,7 +304,7 @@ export async function createResubmissionRequestAction(
     throw new Error(rpcError.message);
   }
 
-  const labDisplayName = await getClassLabDisplayName(submission.class_lab_id);
+  const labDisplayName = await getClassLabDisplayName(submission?.class_lab_id ?? classLabId);
 
   await notifyDiscordResubmission({
     action: "new",
@@ -254,7 +312,7 @@ export async function createResubmissionRequestAction(
     email: user.email,
     name: user.name || user.email,
     className: user.className || "",
-    labId: labDisplayName,
+    labId: requestType === "late" ? `${labDisplayName} (Late submission)` : labDisplayName,
     driveLink: trimmedLink,
     note: note?.trim() || undefined,
   });

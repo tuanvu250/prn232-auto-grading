@@ -105,6 +105,17 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
           <LayoutDashboard className="h-4 w-4" />
           Overview
         </Link>
+                <Link
+          href="/admin/terms"
+          className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+            isTermsActive
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+        >
+          <GraduationCap className="h-4 w-4" />
+          Submissions
+        </Link>
         <Link
           href="/admin/dashboard?view=resubmissions"
           className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
@@ -115,17 +126,6 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
         >
           <UploadCloud className="h-4 w-4" />
           Resubmit Requests
-        </Link>
-        <Link
-          href="/admin/terms"
-          className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-            isTermsActive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }`}
-        >
-          <GraduationCap className="h-4 w-4" />
-          Submissions
         </Link>
       </nav>
 

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState, Fragment } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Users, Search, CheckCircle2, XCircle, AlertCircle, FileText, Eye, History, ExternalLink, RefreshCw, TriangleAlert, Pencil, Trash2, ChevronDown, ChevronUp, FileJson } from "lucide-react";
+import { ArrowLeft, Users, Search, CheckCircle2, XCircle, AlertCircle, FileText, Eye, History, ExternalLink, RefreshCw, TriangleAlert, Pencil, Trash2, ChevronDown, ChevronUp, FileJson, FileDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -51,6 +51,7 @@ import {
   getClassLabsForClassAction,
   getClassesForTermAction,
   getTermsAction,
+  getAdminClassLabSubmissionsAction,
   getAdminStudentSubmissionsAction,
   getAdminStudentResubmissionsAction,
   updateStudentSubmissionAction,
@@ -114,6 +115,27 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function getExcelSafeFilename(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "_") || "export";
+}
+
+function getAttemptTestSummary(submission: ClassLabSubmission) {
+  const tests = submission.details?.results || submission.details?.tests || [];
+  if (tests.length === 0) {
+    return { passed: "", total: "", summary: "" };
+  }
+
+  const passed = tests.filter((test) => test.passed).length;
+  return {
+    passed,
+    total: tests.length,
+    summary: `${passed}/${tests.length}`,
+  };
+}
+
 export default function AdminClassLabStudentsPage() {
   const params = useParams<{ termId: string; classId: string; classLabId: string }>();
   const [results, setResults] = useState<ClassLabStudentResult[]>([]);
@@ -125,6 +147,7 @@ export default function AdminClassLabStudentsPage() {
   // States cho Search và Filter
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [isExporting, setIsExporting] = useState(false);
 
   // Phân trang client-side
   const [currentPage, setCurrentPage] = useState(1);
@@ -328,6 +351,80 @@ export default function AdminClassLabStudentsPage() {
   const gradingCount = results.filter((r) => r.latest_status === "grading").length;
   const notSubmittedCount = results.filter((r) => !r.latest_status).length;
 
+  const handleExportExcel = async () => {
+    if (filteredResults.length === 0) {
+      toast.error("No student rows to export.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const allSubmissions = await getAdminClassLabSubmissionsAction(params.classLabId);
+      const filteredStudentIds = new Set(filteredResults.map((row) => row.class_student_id));
+      const studentById = new Map(filteredResults.map((row) => [row.class_student_id, row]));
+      const exportSubmissions = allSubmissions.filter((submission) =>
+        filteredStudentIds.has(submission.class_student_id)
+      );
+
+      const summaryRows = filteredResults.map((row) => ({
+        "Student Code": row.student_code,
+        "Full Name": row.student_name || "",
+        Email: row.student_email,
+        Term: termName,
+        Class: className,
+        Lab: labCode,
+        "Attempt Count": row.attempt_count,
+        "Resubmit Count": row.resubmit_count,
+        "Latest Attempt": row.latest_attempt_no ?? "",
+        "Latest Score": row.latest_score ?? "",
+        "Latest Status": row.latest_status ?? "not_submitted",
+      }));
+
+      const attemptRows = exportSubmissions.map((submission) => {
+        const student = studentById.get(submission.class_student_id);
+        const testSummary = getAttemptTestSummary(submission);
+
+        return {
+          "Student Code": student?.student_code || "",
+          "Full Name": student?.student_name || "",
+          Email: student?.student_email || "",
+          Term: termName,
+          Class: className,
+          Lab: labCode,
+          "Attempt No": submission.attempt_no,
+          Type: submission.item_type,
+          Score: submission.score ?? "",
+          Status: submission.status,
+          "Passed Tests": testSummary.passed,
+          "Total Tests": testSummary.total,
+          "Test Summary": testSummary.summary,
+          "Source URL": submission.source_url || "",
+          "Submitted At": submission.submitted_at,
+          "Graded At": submission.graded_at || "",
+          "Submission ID": submission.id,
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), "Student Summary");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(attemptRows), "Submission Attempts");
+
+      const statusSuffix = statusFilter === "all" ? "all" : statusFilter;
+      const fileName = getExcelSafeFilename(
+        `${termName || "Term"}_${className || "Class"}_${labCode || "Lab"}_${statusSuffix}_submissions.xlsx`
+      );
+
+      XLSX.writeFile(workbook, fileName);
+      toast.success(`Exported ${summaryRows.length} students and ${attemptRows.length} attempts.`);
+    } catch (err) {
+      console.error("Failed to export submissions:", err);
+      toast.error(getErrorMessage(err, "Failed to export Excel file."));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
       {/* Breadcrumbs */}
@@ -375,10 +472,26 @@ export default function AdminClassLabStudentsPage() {
             Monitor scores, check submission attempts and control resubmission statuses.
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={load} className="shadow-none self-start sm:self-center">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleExportExcel}
+            disabled={loading || isExporting || filteredResults.length === 0}
+            className="shadow-none"
+          >
+            {isExporting ? (
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FileDown className="mr-2 h-4 w-4" />
+            )}
+            Export Excel
+          </Button>
+          <Button size="sm" variant="outline" onClick={load} className="shadow-none">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Thẻ thống kê tổng quan */}
