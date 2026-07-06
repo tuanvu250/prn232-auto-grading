@@ -236,6 +236,12 @@ describe("createResubmissionRequestAction", () => {
     fromQueue.push(
       makeBuilder({ data: { id: "sub-1", class_lab_id: "class-lab-1" }, error: null })
     );
+    fromQueue.push(
+      makeBuilder({
+        data: { labs: { code: "LAB2", title: "Advanced REST API & Security" } },
+        error: null,
+      })
+    );
 
     rpcMock.mockResolvedValue({ data: null, error: null });
 
@@ -248,7 +254,11 @@ describe("createResubmissionRequestAction", () => {
     expect(result).toEqual({ success: true });
     expect(notifyDiscordResubmissionMock).toHaveBeenCalledTimes(1);
     expect(notifyDiscordResubmissionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "new", note: "note" })
+      expect.objectContaining({
+        action: "new",
+        labId: "LAB2 - Advanced REST API & Security",
+        note: "note",
+      })
     );
   });
 

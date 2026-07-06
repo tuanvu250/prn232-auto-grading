@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState, Fragment } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowLeft, Users, Search, CheckCircle2, XCircle, AlertCircle, FileText, Eye, History, ExternalLink, RefreshCw, TriangleAlert, Pencil, Trash2, ChevronDown, ChevronUp, FileJson } from "lucide-react";
 
@@ -40,6 +40,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   getClassLabStudentResultsAction,
   getClassLabsForClassAction,
   getClassesForTermAction,
@@ -49,7 +56,7 @@ import {
   updateStudentSubmissionAction,
   deleteStudentSubmissionAction,
 } from "@/lib/actions/erd-admin";
-import type { ClassLabStudentResult, ClassLabSubmission, ResubmissionRequestV2 } from "@/lib/types/erd";
+import type { ClassLabStudentResult, ClassLabSubmission, ResubmissionRequestV2, SubmissionStatus } from "@/lib/types/erd";
 import { cn } from "@/lib/utils";
 
 function statusBadge(status: string | null) {
@@ -103,9 +110,12 @@ function getStatusCodeBadgeColor(code: number): string {
   return "bg-muted text-muted-foreground border-border/50";
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export default function AdminClassLabStudentsPage() {
   const params = useParams<{ termId: string; classId: string; classLabId: string }>();
-  const router = useRouter();
   const [results, setResults] = useState<ClassLabStudentResult[]>([]);
   const [termName, setTermName] = useState("");
   const [className, setClassName] = useState("");
@@ -186,7 +196,7 @@ export default function AdminClassLabStudentsPage() {
     setEditSubmission(sub);
     setEditStudentCode(studentCode);
     setEditScore(sub.score !== null ? Number(sub.score) : 0);
-    setEditStatus(sub.status as any);
+    setEditStatus(sub.status as SubmissionStatus);
     setEditSourceUrl(sub.source_url || "");
     setIsEditOpen(true);
   }, []);
@@ -216,8 +226,8 @@ export default function AdminClassLabStudentsPage() {
       if (selectedStudent) {
         await handleViewDetails(selectedStudent, selectedAttemptId);
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update submission.");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to update submission."));
     } finally {
       setIsSavingEdit(false);
     }
@@ -244,8 +254,8 @@ export default function AdminClassLabStudentsPage() {
           setSelectedStudent(null);
         }
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to delete submission.");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to delete submission."));
     } finally {
       setIsDeleting(false);
     }
@@ -366,6 +376,7 @@ export default function AdminClassLabStudentsPage() {
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={load} className="shadow-none self-start sm:self-center">
+          <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
       </div>
@@ -449,17 +460,21 @@ export default function AdminClassLabStudentsPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Filter Status:</span>
-          <select
+          <Select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium shadow-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none"
+            onValueChange={setStatusFilter}
           >
-            <option value="all">All Statuses</option>
-            <option value="passed">Passed</option>
-            <option value="failed">Failed</option>
-            <option value="grading">Grading</option>
-            <option value="not_submitted">Not Submitted</option>
-          </select>
+            <SelectTrigger className="h-9 w-[150px] rounded-md shadow-none border-border focus:ring-primary">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="passed">Passed</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="grading">Grading</SelectItem>
+              <SelectItem value="not_submitted">Not Submitted</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -569,7 +584,7 @@ export default function AdminClassLabStudentsPage() {
                                       } else {
                                         toast.error("No submission found to edit.");
                                       }
-                                    } catch (err) {
+                                    } catch {
                                       toast.error("Failed to load submission data.");
                                     }
                                   }}
@@ -590,7 +605,7 @@ export default function AdminClassLabStudentsPage() {
                                       } else {
                                         toast.error("No submission found to delete.");
                                       }
-                                    } catch (err) {
+                                    } catch {
                                       toast.error("Failed to load submission data.");
                                     }
                                   }}
@@ -1131,7 +1146,7 @@ export default function AdminClassLabStudentsPage() {
           <DialogHeader>
             <DialogTitle className="text-lg font-bold">Edit Submission: {editStudentCode}</DialogTitle>
             <DialogDescription className="text-sm">
-              Modify the score, status, and source Drive URL for this student's attempt.
+              Modify the score, status, and source Drive URL for this student attempt.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -1160,15 +1175,19 @@ export default function AdminClassLabStudentsPage() {
               <label className="text-xs font-semibold text-muted-foreground block">
                 Status
               </label>
-              <select
+              <Select
                 value={editStatus}
-                onChange={(e) => setEditStatus(e.target.value as any)}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm shadow-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none"
+                onValueChange={(value) => setEditStatus(value as SubmissionStatus)}
               >
-                <option value="passed">Passed</option>
-                <option value="failed">Failed</option>
-                <option value="grading">Grading</option>
-              </select>
+                <SelectTrigger className="w-full rounded-md shadow-none border-border focus:ring-primary">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="passed">Passed</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="grading">Grading</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground block">

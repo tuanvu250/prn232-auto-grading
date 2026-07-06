@@ -169,6 +169,26 @@ async function checkResubmissionRateLimit(classStudentId: string) {
   return { allowed: true };
 }
 
+async function getClassLabDisplayName(classLabId: string) {
+  const { data, error } = await supabaseServer
+    .from("class_labs")
+    .select("labs(code, title)")
+    .eq("id", classLabId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error resolving class lab display name:", error.message);
+    return classLabId;
+  }
+
+  const lab = Array.isArray(data?.labs) ? data.labs[0] : data?.labs;
+  const code = lab?.code?.trim();
+  const title = lab?.title?.trim();
+
+  if (code && title) return `${code} - ${title}`;
+  return code || title || classLabId;
+}
+
 export interface CreateResubmissionResult {
   success: boolean;
   error?: string;
@@ -226,13 +246,15 @@ export async function createResubmissionRequestAction(
     throw new Error(rpcError.message);
   }
 
+  const labDisplayName = await getClassLabDisplayName(submission.class_lab_id);
+
   await notifyDiscordResubmission({
     action: "new",
     studentId: user.studentId || user.email,
     email: user.email,
     name: user.name || user.email,
     className: user.className || "",
-    labId: submission.class_lab_id,
+    labId: labDisplayName,
     driveLink: trimmedLink,
     note: note?.trim() || undefined,
   });

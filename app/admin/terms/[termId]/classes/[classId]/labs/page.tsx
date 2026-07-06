@@ -4,16 +4,26 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2, FileSpreadsheet, Upload, RefreshCw, Search, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -49,8 +59,10 @@ import {
   getTermsAction,
   updateClassLabDeadlineAction,
   deleteClassLabAction,
+  getClassStudentsForClassAction,
+  importClassStudentsAction,
 } from "@/lib/actions/erd-admin";
-import type { ClassLab, Lab } from "@/lib/types/erd";
+import type { ClassLab, ClassStudentRosterRow, Lab } from "@/lib/types/erd";
 
 function getDeadlineBadge(deadlineStr: string | null) {
   if (!deadlineStr) {
@@ -91,10 +103,105 @@ function getDeadlineBadge(deadlineStr: string | null) {
   }
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+type SheetGrid = string[][];
+type ColumnMapping = {
+  studentCode: string;
+  email: string;
+  name: string;
+};
+
+type ImportPreviewRow = {
+  rowNumber: number;
+  studentCode: string;
+  email: string;
+  name: string;
+  errors: string[];
+};
+
+const emptyMapping: ColumnMapping = {
+  studentCode: "",
+  email: "",
+  name: "",
+};
+const NO_COLUMN_VALUE = "__no_column__";
+
+function normalizeHeader(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ");
+}
+
+function autoDetectMapping(headers: string[]): ColumnMapping {
+  const normalized = headers.map((header) => normalizeHeader(header));
+
+  const findHeader = (candidates: string[]) => {
+    const exactIndex = normalized.findIndex((header) => candidates.includes(header));
+    if (exactIndex >= 0) return headers[exactIndex];
+
+    const fuzzyIndex = normalized.findIndex((header) =>
+      candidates.some((candidate) => header.includes(candidate))
+    );
+    return fuzzyIndex >= 0 ? headers[fuzzyIndex] : "";
+  };
+
+  return {
+    studentCode: findHeader(["student code", "student id", "studentid", "mssv", "ma sv", "masv", "code"]),
+    email: findHeader(["email", "mail", "student email"]),
+    name: findHeader(["full name", "student name", "name", "ho ten", "hoten"]),
+  };
+}
+
+function buildImportPreview(
+  rows: SheetGrid,
+  headers: string[],
+  headerRow: number,
+  mapping: ColumnMapping
+): ImportPreviewRow[] {
+  const columnIndex = {
+    studentCode: headers.indexOf(mapping.studentCode),
+    email: headers.indexOf(mapping.email),
+    name: headers.indexOf(mapping.name),
+  };
+  const seenCodes = new Set<string>();
+  const seenEmails = new Set<string>();
+
+  return rows.slice(headerRow).map((row, index) => {
+    const studentCode = String(row[columnIndex.studentCode] || "").trim().toUpperCase();
+    const email = String(row[columnIndex.email] || "").trim().toLowerCase();
+    const name = String(row[columnIndex.name] || "").trim();
+    const errors: string[] = [];
+
+    if (!studentCode) errors.push("Missing student code");
+    if (!email) errors.push("Missing email");
+    if (!name) errors.push("Missing full name");
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Invalid email");
+    if (studentCode && seenCodes.has(studentCode)) errors.push("Duplicate student code");
+    if (email && seenEmails.has(email)) errors.push("Duplicate email");
+
+    if (studentCode) seenCodes.add(studentCode);
+    if (email) seenEmails.add(email);
+
+    return {
+      rowNumber: index + 1,
+      studentCode,
+      email,
+      name,
+      errors,
+    };
+  });
+}
+
 export default function AdminClassLabsPage() {
   const params = useParams<{ termId: string; classId: string }>();
-  const router = useRouter();
   const [classLabs, setClassLabs] = useState<ClassLab[]>([]);
+  const [students, setStudents] = useState<ClassStudentRosterRow[]>([]);
   const [catalog, setCatalog] = useState<Lab[]>([]);
   const [termName, setTermName] = useState("");
   const [className, setClassName] = useState("");
@@ -119,6 +226,24 @@ export default function AdminClassLabsPage() {
   const [deleteClassLabId, setDeleteClassLabId] = useState<string | null>(null);
   const [deleteLabCode, setDeleteLabCode] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  // States cho Student Roster
+  const [studentQuery, setStudentQuery] = useState("");
+  const [studentCurrentPage, setStudentCurrentPage] = useState(1);
+  const [studentPageSize, setStudentPageSize] = useState(10);
+  const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+  const [addStudentForm, setAddStudentForm] = useState({ studentCode: "", email: "", name: "" });
+  const [isSavingStudent, setIsSavingStudent] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isDraggingExcel, setIsDraggingExcel] = useState(false);
+  const [isImportingStudents, setIsImportingStudents] = useState(false);
+  const [workbookSheets, setWorkbookSheets] = useState<Record<string, SheetGrid>>({});
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState("");
+  const [headerRow, setHeaderRow] = useState(1);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>(emptyMapping);
 
   const handleOpenEditDeadline = useCallback((cl: ClassLab, e: React.MouseEvent) => {
     e.preventDefault();
@@ -168,6 +293,114 @@ export default function AdminClassLabsPage() {
     }
   };
 
+  const resetImportState = () => {
+    setWorkbookSheets({});
+    setSheetNames([]);
+    setSelectedSheet("");
+    setHeaderRow(1);
+    setHeaders([]);
+    setColumnMapping(emptyMapping);
+  };
+
+  const refreshHeadersForSheet = useCallback((sheetName: string, nextHeaderRow: number) => {
+    const rows = workbookSheets[sheetName] || [];
+    const nextHeaders = (rows[Math.max(nextHeaderRow - 1, 0)] || [])
+      .map((cell) => String(cell || "").trim())
+      .filter(Boolean);
+
+    setHeaders(nextHeaders);
+    setColumnMapping(autoDetectMapping(nextHeaders));
+  }, [workbookSheets]);
+
+  useEffect(() => {
+    if (!selectedSheet) return;
+    refreshHeadersForSheet(selectedSheet, headerRow);
+  }, [selectedSheet, headerRow, refreshHeadersForSheet]);
+
+  const handleExcelFileChange = async (file: File | null) => {
+    if (!file) return;
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      toast.error("Please choose an .xlsx or .xls file.");
+      return;
+    }
+    setIsParsingExcel(true);
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const nextSheets: Record<string, SheetGrid> = {};
+
+      workbook.SheetNames.forEach((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, {
+          header: 1,
+          defval: "",
+          blankrows: false,
+        });
+        nextSheets[sheetName] = rows.map((row) => row.map((cell) => String(cell ?? "")));
+      });
+
+      if (workbook.SheetNames.length === 0) {
+        throw new Error("No sheets found in this workbook.");
+      }
+
+      setWorkbookSheets(nextSheets);
+      setSheetNames(workbook.SheetNames);
+      setSelectedSheet(workbook.SheetNames[0]);
+      setHeaderRow(1);
+      toast.success(`Loaded ${workbook.SheetNames.length} sheet${workbook.SheetNames.length > 1 ? "s" : ""}.`);
+    } catch (err: unknown) {
+      resetImportState();
+      toast.error(getErrorMessage(err, "Unable to read Excel file."));
+    } finally {
+      setIsParsingExcel(false);
+    }
+  };
+
+  const handleExcelDrop = (event: React.DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setIsDraggingExcel(false);
+    if (isParsingExcel || isImportingStudents) return;
+    handleExcelFileChange(event.dataTransfer.files?.[0] || null);
+  };
+
+  const handleSaveStudent = async () => {
+    setIsSavingStudent(true);
+    try {
+      const result = await importClassStudentsAction(params.classId, [addStudentForm]);
+      toast.success(`Added ${result.imported} student${result.imported === 1 ? "" : "s"}.`);
+      setIsAddStudentOpen(false);
+      setAddStudentForm({ studentCode: "", email: "", name: "" });
+      await load();
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to add student."));
+    } finally {
+      setIsSavingStudent(false);
+    }
+  };
+
+  const handleImportStudents = async (validRows: ImportPreviewRow[]) => {
+    setIsImportingStudents(true);
+    try {
+      const result = await importClassStudentsAction(
+        params.classId,
+        validRows.map((row) => ({
+          studentCode: row.studentCode,
+          email: row.email,
+          name: row.name,
+        }))
+      );
+      toast.success(`Imported ${result.imported} student${result.imported === 1 ? "" : "s"}${result.skipped ? `, skipped ${result.skipped}` : ""}.`);
+      setIsImportOpen(false);
+      resetImportState();
+      await load();
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to import students."));
+    } finally {
+      setIsImportingStudents(false);
+    }
+  };
+
   const selectedDate = deadline ? new Date(deadline) : undefined;
 
   const formattedDeadline = deadline
@@ -185,20 +418,18 @@ export default function AdminClassLabsPage() {
       })()
     : "Pick a date";
 
-  // Phân trang client-side
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [labs, allLabs, classesData, termsData] = await Promise.all([
+      const [labs, roster, allLabs, classesData, termsData] = await Promise.all([
         getClassLabsForClassAction(params.classId),
+        getClassStudentsForClassAction(params.classId),
         getLabCatalogAction(),
         getClassesForTermAction(params.termId),
         getTermsAction(),
       ]);
       setClassLabs(labs);
+      setStudents(roster);
       setCatalog(allLabs);
 
       const currentTerm = termsData.find((t) => t.id === params.termId);
@@ -206,14 +437,14 @@ export default function AdminClassLabsPage() {
 
       const currentClass = classesData.find((c) => c.id === params.classId);
       setClassName(currentClass ? currentClass.name : "Class");
-      setCurrentPage(1);
+      setStudentCurrentPage(1);
     } catch (err) {
       console.error("Failed to load class labs:", err);
       toast.error("Unable to load labs.");
     } finally {
       setLoading(false);
     }
-  }, [params.classId, params.termId]);
+  }, [params.classId, params.termId, setStudentCurrentPage]);
 
   useEffect(() => {
     load();
@@ -248,11 +479,37 @@ export default function AdminClassLabsPage() {
     }
   };
 
-  // Tính toán dữ liệu phân trang
   const total = classLabs.length;
-  const totalPages = Math.ceil(total / pageSize) || 1;
-  const startIndex = (currentPage - 1) * pageSize;
-  const paginatedClassLabs = classLabs.slice(startIndex, startIndex + pageSize);
+  const filteredStudents = students.filter((student) => {
+    const query = studentQuery.toLowerCase();
+    return (
+      student.student_code.toLowerCase().includes(query) ||
+      (student.student_name || "").toLowerCase().includes(query) ||
+      student.student_email.toLowerCase().includes(query)
+    );
+  });
+  const studentTotal = filteredStudents.length;
+  const studentTotalPages = Math.ceil(studentTotal / studentPageSize) || 1;
+  const studentStartIndex = (studentCurrentPage - 1) * studentPageSize;
+  const paginatedStudents = filteredStudents.slice(
+    studentStartIndex,
+    studentStartIndex + studentPageSize
+  );
+  const selectedSheetRows = selectedSheet ? workbookSheets[selectedSheet] || [] : [];
+  const importPreview = buildImportPreview(selectedSheetRows, headers, headerRow, columnMapping);
+  const validImportRows = importPreview.filter((row) => row.errors.length === 0);
+  const invalidImportRows = importPreview.length - validImportRows.length;
+  const canAddStudent =
+    addStudentForm.studentCode.trim() &&
+    addStudentForm.email.trim() &&
+    addStudentForm.name.trim() &&
+    !isSavingStudent;
+  const canImportStudents =
+    validImportRows.length > 0 &&
+    columnMapping.studentCode &&
+    columnMapping.email &&
+    columnMapping.name &&
+    !isImportingStudents;
 
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
@@ -294,16 +551,21 @@ export default function AdminClassLabsPage() {
             Manage auto-graded assignments, test configurations and deadlines.
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setDialogOpen(true)}
-          className="bg-primary hover:bg-primary-hover text-white shadow-none border-none self-start sm:self-center"
-        >
-          <Plus className="mr-1.5 h-4 w-4" /> Assign lab
-        </Button>
       </div>
 
       <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold tracking-tight text-foreground">Labs</h2>
+            <p className="text-xs text-muted-foreground">
+              Open a lab to review scores and submissions. {total} assigned.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setDialogOpen(true)} className="shadow-none">
+            <Plus className="mr-2 h-4 w-4" />
+            Add lab
+          </Button>
+        </div>
         {loading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3].map((i) => (
@@ -332,13 +594,12 @@ export default function AdminClassLabsPage() {
               Assign an existing lab or create a new one for this class.
             </p>
             <Button size="sm" onClick={() => setDialogOpen(true)} variant="outline">
-              Assign Lab
+              Add lab
             </Button>
           </Card>
         ) : (
-          <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {paginatedClassLabs.map((cl) => (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {classLabs.map((cl) => (
                 <Link
                   key={cl.id}
                   href={`/admin/terms/${params.termId}/classes/${params.classId}/labs/${cl.id}/students`}
@@ -391,25 +652,398 @@ export default function AdminClassLabsPage() {
                   </Card>
                 </Link>
               ))}
+          </div>
+        )}
+      </div>
+
+      <section className="space-y-4 border-t border-border pt-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold tracking-tight text-foreground">
+              Students in {className || "Class"}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Manage the class roster once, then use each lab card above to inspect results.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="font-mono">Total {students.length}</Badge>
+              <Badge variant="outline" className="font-mono">Showing {studentTotal}</Badge>
             </div>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-2xl">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={studentQuery}
+                onChange={(e) => {
+                  setStudentQuery(e.target.value);
+                  setStudentCurrentPage(1);
+                }}
+                placeholder="Search student code, name or email..."
+                className="pl-9 shadow-none border-border focus-visible:ring-primary"
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setIsImportOpen(true)} className="h-10 shadow-none">
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Import
+            </Button>
+            <Button size="sm" onClick={() => setIsAddStudentOpen(true)} className="h-10 shadow-none">
+              <Users className="mr-2 h-4 w-4" />
+              Add
+            </Button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="space-y-3">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-4 w-56" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : filteredStudents.length === 0 ? (
+          <Card className="p-8 text-center text-sm text-muted-foreground border border-dashed shadow-none rounded-xl">
+            <Users className="mx-auto h-8 w-8 text-muted-foreground/60 mb-3" />
+            <p className="font-medium text-foreground mb-1">No students found</p>
+            <p className="text-xs text-muted-foreground mb-4">
+              {students.length === 0
+                ? "Import an Excel file or add students one by one to build this class roster."
+                : "No student matches the current search."}
+            </p>
+            {students.length === 0 ? (
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setIsImportOpen(true)}>
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                  Import Excel
+                </Button>
+                <Button size="sm" onClick={() => setIsAddStudentOpen(true)}>
+                  <Users className="mr-2 h-4 w-4" />
+                  Add Student
+                </Button>
+              </div>
+            ) : null}
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            <Card className="border border-border shadow-none rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-muted/20">
+                    <TableRow className="hover:bg-transparent border-b border-border">
+                      <TableHead className="font-semibold text-xs text-muted-foreground tracking-wider">
+                        Student Code
+                      </TableHead>
+                      <TableHead className="font-semibold text-xs text-muted-foreground tracking-wider">
+                        Full Name
+                      </TableHead>
+                      <TableHead className="font-semibold text-xs text-muted-foreground tracking-wider">
+                        Email
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedStudents.map((student) => (
+                      <TableRow key={student.class_student_id} className="hover:bg-muted/10 border-b border-border/60 transition-colors">
+                        <TableCell className="font-semibold font-mono text-sm tracking-tight text-foreground">
+                          {student.student_code}
+                        </TableCell>
+                        <TableCell className="text-sm font-medium">
+                          {student.student_name || "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">
+                          {student.student_email}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
 
             <TablePagination
               pagination={{
-                page: currentPage,
-                pageSize: pageSize,
-                total: total,
-                totalPages: totalPages,
+                page: studentCurrentPage,
+                pageSize: studentPageSize,
+                total: studentTotal,
+                totalPages: studentTotalPages,
               }}
               loading={loading}
-              onPageChange={setCurrentPage}
+              onPageChange={setStudentCurrentPage}
               onPageSizeChange={(size) => {
-                setPageSize(size);
-                setCurrentPage(1);
+                setStudentPageSize(size);
+                setStudentCurrentPage(1);
               }}
             />
           </div>
         )}
-      </div>
+      </section>
+
+      {/* Add Student Dialog */}
+      <Dialog open={isAddStudentOpen} onOpenChange={setIsAddStudentOpen}>
+        <DialogContent className="max-w-md bg-card border border-border">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Add Student to {className || "Class"}</DialogTitle>
+            <DialogDescription className="text-sm">
+              Add one student to the current class roster.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground block">Student Code</label>
+              <Input
+                value={addStudentForm.studentCode}
+                onChange={(e) => setAddStudentForm((prev) => ({ ...prev, studentCode: e.target.value }))}
+                placeholder="SE182672"
+                className="focus-visible:ring-primary shadow-none border-border font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground block">Email</label>
+              <Input
+                type="email"
+                value={addStudentForm.email}
+                onChange={(e) => setAddStudentForm((prev) => ({ ...prev, email: e.target.value }))}
+                placeholder="student@fpt.edu.vn"
+                className="focus-visible:ring-primary shadow-none border-border"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground block">Full Name</label>
+              <Input
+                value={addStudentForm.name}
+                onChange={(e) => setAddStudentForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Nguyen Van A"
+                className="focus-visible:ring-primary shadow-none border-border"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0 border-t border-border pt-4">
+            <Button variant="outline" className="shadow-none" onClick={() => setIsAddStudentOpen(false)} disabled={isSavingStudent}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveStudent} disabled={!canAddStudent} className="shadow-none">
+              {isSavingStudent ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
+              Add Student
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Students Dialog */}
+      <Dialog
+        open={isImportOpen}
+        onOpenChange={(open) => {
+          setIsImportOpen(open);
+          if (!open) resetImportState();
+        }}
+      >
+        <DialogContent className="flex h-[calc(100dvh-2rem)] max-h-[760px] max-w-5xl flex-col overflow-hidden bg-card border border-border p-0">
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
+            <DialogTitle className="text-lg font-bold">Import Students from Excel</DialogTitle>
+            <DialogDescription className="text-sm">
+              Select a sheet, map the Excel columns, then import valid rows into {className || "this class"}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
+            <div
+              className={cn(
+                "shrink-0 rounded-lg border border-dashed transition-colors",
+                isDraggingExcel
+                  ? "border-primary bg-primary/5"
+                  : "border-border bg-muted/20",
+                sheetNames.length > 0 ? "p-2.5" : "p-6"
+              )}
+            >
+              <label
+                className={cn(
+                  "flex cursor-pointer items-center gap-3",
+                  sheetNames.length === 0 && "min-h-40 justify-center text-center"
+                )}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  if (!isParsingExcel && !isImportingStudents) setIsDraggingExcel(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  if (!isParsingExcel && !isImportingStudents) setIsDraggingExcel(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  setIsDraggingExcel(false);
+                }}
+                onDrop={handleExcelDrop}
+              >
+                <span className={cn(
+                  "flex shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary",
+                  sheetNames.length > 0 ? "h-9 w-9" : "h-14 w-14"
+                )}>
+                  <Upload className={sheetNames.length > 0 ? "h-4 w-4" : "h-7 w-7"} />
+                </span>
+                <span className={cn("min-w-0", sheetNames.length > 0 ? "flex-1" : "")}>
+                  <span className="block text-sm font-semibold text-foreground">
+                    {isParsingExcel
+                      ? "Reading workbook..."
+                      : isDraggingExcel
+                        ? "Drop the Excel file here"
+                        : "Drag Excel here or choose a file"}
+                  </span>
+                  <span className={cn(
+                    "block text-xs text-muted-foreground",
+                    sheetNames.length > 0 ? "truncate" : "mt-1"
+                  )}>
+                    Supports .xlsx and .xls. Required columns can be mapped manually after upload.
+                  </span>
+                </span>
+                <Input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  disabled={isParsingExcel || isImportingStudents}
+                  onChange={(e) => handleExcelFileChange(e.target.files?.[0] || null)}
+                />
+              </label>
+            </div>
+
+            {sheetNames.length > 0 ? (
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground block">Sheet</label>
+                    <Select
+                      value={selectedSheet}
+                      onValueChange={setSelectedSheet}
+                    >
+                      <SelectTrigger className="w-full rounded-md shadow-none border-border focus:ring-primary">
+                        <SelectValue placeholder="Select sheet" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sheetNames.map((sheetName) => (
+                          <SelectItem key={sheetName} value={sheetName}>
+                            {sheetName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground block">Header Row</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={Math.max(selectedSheetRows.length, 1)}
+                      value={headerRow}
+                      onChange={(e) => setHeaderRow(Math.max(parseInt(e.target.value, 10) || 1, 1))}
+                      className="focus-visible:ring-primary shadow-none border-border"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    ["studentCode", "Student Code"],
+                    ["email", "Email"],
+                    ["name", "Full Name"],
+                  ].map(([key, label]) => (
+                    <div key={key} className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground block">{label}</label>
+                      <Select
+                        value={columnMapping[key as keyof ColumnMapping] || NO_COLUMN_VALUE}
+                        onValueChange={(value) =>
+                          setColumnMapping((prev) => ({
+                            ...prev,
+                            [key]: value === NO_COLUMN_VALUE ? "" : value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger className="w-full rounded-md shadow-none border-border focus:ring-primary">
+                          <SelectValue placeholder="Select column" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_COLUMN_VALUE}>Select column</SelectItem>
+                        {headers.map((header) => (
+                          <SelectItem key={header} value={header}>
+                            {header}
+                          </SelectItem>
+                        ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="font-mono">Rows: {importPreview.length}</Badge>
+                  <Badge className="border-none bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/10 font-mono">
+                    Valid: {validImportRows.length}
+                  </Badge>
+                  <Badge className="border-none bg-red-500/10 text-red-600 hover:bg-red-500/10 font-mono">
+                    Invalid: {invalidImportRows}
+                  </Badge>
+                </div>
+
+                <div className="min-h-[140px] flex-1 overflow-hidden rounded-lg border border-border">
+                  <div className="h-full overflow-auto pb-3">
+                    <Table className="min-w-[760px]">
+                      <TableHeader className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="w-[80px]">Row</TableHead>
+                          <TableHead>Student Code</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Full Name</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {importPreview.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                              No preview rows. Check the selected sheet, header row and column mapping.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          importPreview.map((row) => (
+                            <TableRow key={row.rowNumber}>
+                              <TableCell className="font-mono text-xs">{row.rowNumber}</TableCell>
+                              <TableCell className="font-mono text-sm font-semibold">{row.studentCode || "—"}</TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">{row.email || "—"}</TableCell>
+                              <TableCell className="text-sm">{row.name || "—"}</TableCell>
+                              <TableCell>
+                                {row.errors.length === 0 ? (
+                                  <Badge className="border-none bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/10">Valid</Badge>
+                                ) : (
+                                  <Badge className="border-none bg-red-500/10 text-red-600 hover:bg-red-500/10">
+                                    {row.errors.join(", ")}
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <DialogFooter className="relative z-10 shrink-0 gap-2 border-t border-border bg-card px-6 py-3 sm:gap-0">
+            <Button variant="outline" className="shadow-none" onClick={() => setIsImportOpen(false)} disabled={isImportingStudents}>
+              Cancel
+            </Button>
+            <Button onClick={() => handleImportStudents(validImportRows)} disabled={!canImportStudents} className="shadow-none">
+              {isImportingStudents ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+              Import Students
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[400px] border border-border shadow-none rounded-xl">

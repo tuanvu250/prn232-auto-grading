@@ -8,13 +8,11 @@ import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
 import {
   GraduationCap,
-  KeyRound,
   LogOut,
   UploadCloud,
   User as UserIcon,
   Menu,
   X,
-  Users,
   LayoutDashboard,
 } from "lucide-react";
 
@@ -71,8 +69,6 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     pathname === "/admin/dashboard" && currentView === "overview";
   const isResubmissionsActive =
     pathname === "/admin/dashboard" && currentView === "resubmissions";
-  const isStudentAccessActive =
-    pathname === "/admin/dashboard" && currentView === "studentAccess";
   const isTermsActive = pathname.startsWith("/admin/terms");
 
   if (!user) {
@@ -119,17 +115,6 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
         >
           <UploadCloud className="h-4 w-4" />
           Resubmit Requests
-        </Link>
-        <Link
-          href="/admin/dashboard?view=studentAccess"
-          className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-            isStudentAccessActive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }`}
-        >
-          <Users className="h-4 w-4" />
-          Students
         </Link>
         <Link
           href="/admin/terms"

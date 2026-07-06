@@ -6,6 +6,7 @@ import type {
   Term,
   ClassRow,
   ClassLab,
+  ClassStudentRosterRow,
   ClassLabStudentResult,
   ClassLabSubmission,
   ResubmissionRequestV2,
@@ -84,6 +85,39 @@ export async function getClassLabStudentResultsAction(
 
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+export async function getClassStudentsForClassAction(
+  classId: string
+): Promise<ClassStudentRosterRow[]> {
+  await requireAdmin();
+
+  const { data, error } = await supabaseServer
+    .from("class_students")
+    .select("id, student_id, students!inner(id, email, student_code, name)")
+    .eq("class_id", classId)
+    .order("student_code", { referencedTable: "students", ascending: true });
+
+  if (error) throw new Error(error.message);
+
+  interface ClassStudentJoinRow {
+    id: string;
+    student_id: string;
+    students: {
+      id: string;
+      email: string;
+      student_code: string;
+      name: string | null;
+    } | null;
+  }
+
+  return ((data ?? []) as unknown as ClassStudentJoinRow[]).map((row) => ({
+    class_student_id: row.id,
+    student_id: row.student_id || row.students?.id || "",
+    student_code: row.students?.student_code ?? "",
+    student_name: row.students?.name ?? null,
+    student_email: row.students?.email ?? "",
+  }));
 }
 
 // Lab catalog management (step 2 of phase-05) -------------------------------------
@@ -249,7 +283,7 @@ export async function deleteStudentSubmissionAction(submissionId: string) {
   }
 
   // Xóa submission
-  const { data, error } = await supabaseServer
+  const { error } = await supabaseServer
     .from("class_lab_submissions")
     .delete()
     .eq("id", submissionId)
@@ -257,6 +291,73 @@ export async function deleteStudentSubmissionAction(submissionId: string) {
 
   if (error) throw new Error(error.message);
   return { success: true };
+}
+
+export interface ImportClassStudentRow {
+  email: string;
+  studentCode: string;
+  name: string;
+}
+
+export async function importClassStudentsAction(
+  classId: string,
+  rows: ImportClassStudentRow[]
+) {
+  await requireAdmin();
+
+  const normalizedRows = rows
+    .map((row) => ({
+      email: row.email.trim().toLowerCase(),
+      student_code: row.studentCode.trim().toUpperCase(),
+      name: row.name.trim(),
+    }))
+    .filter((row) => row.email && row.student_code && row.name);
+
+  if (!classId) throw new Error("Class is required");
+  if (normalizedRows.length === 0) throw new Error("No valid student rows found");
+
+  const uniqueRows = Array.from(
+    new Map(normalizedRows.map((row) => [row.email, row])).values()
+  );
+
+  let imported = 0;
+  let skipped = normalizedRows.length - uniqueRows.length;
+
+  for (const row of uniqueRows) {
+    const { data: student, error: studentError } = await supabaseServer
+      .from("students")
+      .upsert(
+        { email: row.email, student_code: row.student_code, name: row.name },
+        { onConflict: "email" }
+      )
+      .select("id")
+      .single();
+
+    if (studentError || !student) {
+      skipped++;
+      continue;
+    }
+
+    const { error: linkError } = await supabaseServer
+      .from("class_students")
+      .upsert(
+        { class_id: classId, student_id: student.id },
+        { onConflict: "class_id, student_id" }
+      );
+
+    if (linkError) {
+      skipped++;
+      continue;
+    }
+
+    imported++;
+  }
+
+  return {
+    imported,
+    skipped,
+    total: normalizedRows.length,
+  };
 }
 
 export async function updateTermAction(
@@ -308,7 +409,7 @@ export async function deleteTermAction(termId: string) {
   }
 
   // 3. Xóa term
-  const { data, error } = await supabaseServer
+  const { error } = await supabaseServer
     .from("terms")
     .delete()
     .eq("id", termId)
@@ -337,7 +438,7 @@ export async function updateClassAction(classId: string, name: string) {
 export async function deleteClassAction(classId: string) {
   await requireAdmin();
 
-  const { data, error } = await supabaseServer
+  const { error } = await supabaseServer
     .from("classes")
     .delete()
     .eq("id", classId)
@@ -350,7 +451,7 @@ export async function deleteClassAction(classId: string) {
 export async function deleteClassLabAction(classLabId: string) {
   await requireAdmin();
 
-  const { data, error } = await supabaseServer
+  const { error } = await supabaseServer
     .from("class_labs")
     .delete()
     .eq("id", classLabId)

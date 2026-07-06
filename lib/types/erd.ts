@@ -33,6 +33,14 @@ export interface StudentRow {
   name: string | null;
 }
 
+export interface ClassStudentRosterRow {
+  class_student_id: string;
+  student_id: string;
+  student_code: string;
+  student_name: string | null;
+  student_email: string;
+}
+
 export type SubmissionItemType = "original" | "late" | "resubmit";
 export type SubmissionStatus = "grading" | "passed" | "failed";
 
