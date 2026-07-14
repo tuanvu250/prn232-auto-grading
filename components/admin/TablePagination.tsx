@@ -36,7 +36,7 @@ export function TablePagination({
   const canNext = pagination.page < pagination.totalPages && !loading;
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="text-sm text-muted-foreground">
         Showing {start}-{end} of {pagination.total}
       </div>

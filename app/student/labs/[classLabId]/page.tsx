@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { UserPayload } from "@/lib/utils/auth";
-import { queryCache } from "@/lib/utils/queryCache";
 import {
   ArrowLeft,
   TriangleAlert,
@@ -44,26 +44,53 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  getClassLabAttemptsAction,
-  getClassLabSubmissionAccessAction,
-  getResubmissionRequestForClassLabAction,
-  createResubmissionRequestAction,
-} from "@/lib/actions/erd-student";
-import type { ClassLabSubmission, ResubmissionRequestV2, StudentClassLabOverview } from "@/lib/types/erd";
+import { createResubmissionRequestAction } from "@/lib/actions/erd-student";
+import { studentClassLabQueryOptions, studentQueryKeys } from "@/lib/queries/student";
 
 function statusBadge(status: string) {
   if (status === "passed")
-    return <Badge className="border-none bg-emerald-500 text-white font-medium text-xs px-2.5 py-0.5">Passed</Badge>;
+    return (
+      <Badge className="border-none bg-emerald-500 text-white font-medium text-xs px-2.5 py-0.5">
+        Passed
+      </Badge>
+    );
   if (status === "failed")
-    return <Badge className="border-none bg-red-600 text-white font-medium text-xs px-2.5 py-0.5">Failed</Badge>;
-  return <Badge className="border-none bg-amber-500 text-white font-medium text-xs px-2.5 py-0.5">Grading</Badge>;
+    return (
+      <Badge className="border-none bg-red-600 text-white font-medium text-xs px-2.5 py-0.5">
+        Failed
+      </Badge>
+    );
+  return (
+    <Badge className="border-none bg-amber-500 text-white font-medium text-xs px-2.5 py-0.5">
+      Grading
+    </Badge>
+  );
 }
 
 function itemTypeBadge(itemType: string) {
-  if (itemType === "resubmit") return <Badge variant="outline" className="text-[10px] font-bold uppercase">Resubmit</Badge>;
-  if (itemType === "late") return <Badge variant="outline" className="text-[10px] font-bold uppercase border-amber-300 text-amber-600 bg-amber-500/5">Late</Badge>;
-  return <Badge variant="outline" className="text-[10px] font-bold uppercase border-muted-foreground/30 text-muted-foreground">Original</Badge>;
+  if (itemType === "resubmit")
+    return (
+      <Badge variant="outline" className="text-[10px] font-bold uppercase">
+        Resubmit
+      </Badge>
+    );
+  if (itemType === "late")
+    return (
+      <Badge
+        variant="outline"
+        className="text-[10px] font-bold uppercase border-amber-300 text-amber-600 bg-amber-500/5"
+      >
+        Late
+      </Badge>
+    );
+  return (
+    <Badge
+      variant="outline"
+      className="text-[10px] font-bold uppercase border-muted-foreground/30 text-muted-foreground"
+    >
+      Original
+    </Badge>
+  );
 }
 
 function formatDate(dateStr: string) {
@@ -118,14 +145,20 @@ function getStatusCodeBadgeColor(statusCode?: number | null) {
 export default function ClassLabAttemptsPage() {
   const params = useParams<{ classLabId: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const urlSubmissionId = searchParams.get("submissionId");
 
   const [user, setUser] = useState<UserPayload | null>(null);
-  const [attempts, setAttempts] = useState<ClassLabSubmission[]>([]);
-  const [labAccess, setLabAccess] = useState<Pick<StudentClassLabOverview, "class_lab_id" | "lab_code" | "lab_title" | "deadline" | "drive_root_url"> | null>(null);
-  const [request, setRequest] = useState<ResubmissionRequestV2 | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: classLabData,
+    dataUpdatedAt,
+    error: classLabError,
+    isPending: loading,
+  } = useQuery(studentClassLabQueryOptions(params.classLabId));
+  const attempts = useMemo(() => classLabData?.attempts ?? [], [classLabData?.attempts]);
+  const request = classLabData?.request ?? null;
+  const labAccess = classLabData?.labAccess ?? null;
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -148,44 +181,11 @@ export default function ClassLabAttemptsPage() {
   const [resubmitNote, setResubmitNote] = useState("");
   const [submittingResubmit, setSubmittingResubmit] = useState(false);
 
-  const load = useCallback(async () => {
-    const cacheKey = `lab-details-${params.classLabId}`;
-    const cached = queryCache.get<{ attempts: ClassLabSubmission[]; request: ResubmissionRequestV2 | null; labAccess: Pick<StudentClassLabOverview, "class_lab_id" | "lab_code" | "lab_title" | "deadline" | "drive_root_url"> | null }>(cacheKey, 30000); // 30 seconds stale time
-
-    if (cached.data) {
-      setAttempts(cached.data.attempts);
-      setRequest(cached.data.request);
-      setLabAccess(cached.data.labAccess);
-      setLoading(false);
-      if (!cached.isStale) {
-        return;
-      }
-    } else {
-      setLoading(true);
-    }
-
-    try {
-      const [attemptRows, requestRow, accessRow] = await Promise.all([
-        getClassLabAttemptsAction(params.classLabId),
-        getResubmissionRequestForClassLabAction(params.classLabId),
-        getClassLabSubmissionAccessAction(params.classLabId),
-      ]);
-
-      setAttempts(attemptRows);
-      setRequest(requestRow);
-      setLabAccess(accessRow);
-
-      // Update cache
-      queryCache.set(cacheKey, { attempts: attemptRows, request: requestRow, labAccess: accessRow });
-    } catch (err) {
-      console.error("Failed to load attempt history:", err);
-      if (!cached.data) {
-        toast.error("Unable to load attempt history.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [params.classLabId]);
+  useEffect(() => {
+    if (!classLabError) return;
+    console.error("Failed to load attempt history:", classLabError);
+    toast.error("Unable to load attempt history.");
+  }, [classLabError]);
 
   // Synchronize URL submissionId or default to latest attempt when attempts change
   useEffect(() => {
@@ -209,13 +209,6 @@ export default function ClassLabAttemptsPage() {
     }
   }, [urlSubmissionId, attempts]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      load();
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [load]);
-
   const handleSelectAttempt = (id: string) => {
     setSelectedAttemptId(id);
     setExpandedTests({});
@@ -229,7 +222,7 @@ export default function ClassLabAttemptsPage() {
   const hasAttempts = attempts.length > 0;
   const deadlineTime = labAccess?.deadline ? new Date(labAccess.deadline).getTime() : null;
   const hasDeadline = deadlineTime !== null && Number.isFinite(deadlineTime);
-  const isBeforeDeadline = hasDeadline ? deadlineTime > Date.now() : false;
+  const isBeforeDeadline = hasDeadline ? deadlineTime > dataUpdatedAt : false;
   const requestType = hasAttempts ? "resubmit" : "late";
   const canRequestLate = !hasAttempts && (!hasDeadline || !isBeforeDeadline);
   const canOpenRequest = hasAttempts || canRequestLate;
@@ -252,16 +245,21 @@ export default function ClassLabAttemptsPage() {
         toast.error(result.error || "Unable to submit the resubmission request.");
         return;
       }
-      toast.success(`${requestType === "late" ? "Late submission" : "Resubmission"} request sent. Admins will be notified.`);
+      toast.success(
+        `${requestType === "late" ? "Late submission" : "Resubmission"} request sent. Admins will be notified.`
+      );
       setDriveLink("");
       setResubmitNote("");
       setResubmitDialogOpen(false);
 
-      // Invalidate cache
-      queryCache.invalidate(`lab-details-${params.classLabId}`);
-      queryCache.invalidate("student-labs");
-
-      load(); // Refresh attempts & requests
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: studentQueryKeys.classLab(params.classLabId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: studentQueryKeys.labOverview(),
+        }),
+      ]);
     } catch (err) {
       console.error("Failed to save resubmission request:", err);
       toast.error("Unable to reach the server.");
@@ -287,21 +285,26 @@ export default function ClassLabAttemptsPage() {
       <header className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur-sm shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6">
           <div className="flex items-center gap-2 sm:gap-3">
-            <Button size="sm" variant="ghost" onClick={() => router.push("/student/dashboard")} className="px-2 sm:px-3">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => router.push("/student/dashboard")}
+              className="px-2 sm:px-3"
+            >
               <ArrowLeft className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">Back to Dashboard</span>
             </Button>
             <div className="h-4 w-px bg-border shrink-0 hidden md:block" />
-            <h1 className="text-sm font-bold text-foreground hidden md:block">Lab Attempt details & History</h1>
+            <h1 className="text-sm font-bold text-foreground hidden md:block">
+              Lab Attempt details & History
+            </h1>
           </div>
 
           <div className="flex items-center gap-4">
             {user && (
               <div className="flex items-center gap-3">
                 <div className="hidden sm:flex flex-col items-end leading-tight select-none">
-                  <span className="text-xs font-bold text-foreground">
-                    {user.name}
-                  </span>
+                  <span className="text-xs font-bold text-foreground">{user.name}</span>
                   <span className="text-[10px] text-muted-foreground font-medium font-sans">
                     {user.email} {user.className ? `· ${user.className}` : ""}
                   </span>
@@ -558,9 +561,7 @@ export default function ClassLabAttemptsPage() {
                       <span className="text-sm text-muted-foreground">
                         Score:{" "}
                         <span className="font-bold text-foreground">
-                          {selectedAttempt.score !== null
-                            ? selectedAttempt.score.toFixed(2)
-                            : "—"}{" "}
+                          {selectedAttempt.score !== null ? selectedAttempt.score.toFixed(2) : "—"}{" "}
                           / 10
                         </span>
                       </span>
@@ -645,7 +646,9 @@ export default function ClassLabAttemptsPage() {
                                       </>
                                     ) : (
                                       <>
-                                        <TableHead className="h-10 text-xs min-w-[220px]">Testcase</TableHead>
+                                        <TableHead className="h-10 text-xs min-w-[220px]">
+                                          Testcase
+                                        </TableHead>
                                         <TableHead className="h-10 text-xs w-[120px] min-w-[100px] text-center">
                                           Result
                                         </TableHead>
@@ -663,9 +666,7 @@ export default function ClassLabAttemptsPage() {
                                     const method = tc.httpMethod || tc.method;
                                     const url = tc.urlTemplate || tc.url || tc.name;
                                     const statusCode =
-                                      tc.actualStatusCode ??
-                                      tc.statusCode ??
-                                      tc.actual_status_code;
+                                      tc.actualStatusCode ?? tc.statusCode ?? tc.actual_status_code;
                                     const responseVal = tc.actualResponse || tc.actual_response;
                                     const err = tc.errorMessage || tc.error;
                                     const hasOverride =
@@ -674,7 +675,7 @@ export default function ClassLabAttemptsPage() {
 
                                     const scoreToDisplay = hasOverride
                                       ? tc.manualOverrideScore
-                                      : tc.effectiveScore ?? tc.awardedScore ?? tc.score;
+                                      : (tc.effectiveScore ?? tc.awardedScore ?? tc.score);
 
                                     const hasDetails = !!(err || responseVal || tc.overrideReason);
                                     const isExpanded = !!expandedTests[idx];
@@ -712,8 +713,7 @@ export default function ClassLabAttemptsPage() {
                                                 </div>
                                               </TableCell>
                                               <TableCell className="py-3 text-center min-w-[100px]">
-                                                {statusCode !== undefined &&
-                                                statusCode !== null ? (
+                                                {statusCode !== undefined && statusCode !== null ? (
                                                   <span
                                                     className={`inline-flex items-center justify-center font-mono font-semibold text-[11px] px-2.5 py-0.5 rounded-full border select-none ${getStatusCodeBadgeColor(
                                                       statusCode
@@ -1080,7 +1080,9 @@ export default function ClassLabAttemptsPage() {
       >
         <DialogContent className="font-quicksand">
           <DialogHeader>
-            <DialogTitle>{requestType === "late" ? "Request Late Submission" : "Request Resubmission"}</DialogTitle>
+            <DialogTitle>
+              {requestType === "late" ? "Request Late Submission" : "Request Resubmission"}
+            </DialogTitle>
             <DialogDescription>
               {requestType === "late"
                 ? "Submit a Google Drive link to request a late first submission for this lab."
@@ -1096,7 +1098,8 @@ export default function ClassLabAttemptsPage() {
               <div className="min-w-0">
                 <p className="font-bold text-red-800 dark:text-red-300">Important Note</p>
                 <p className="mt-0.5 text-xs text-red-700 dark:text-red-400 font-medium">
-                  Please do not spam requests. Kindly wait for the admin to review and process your submission.
+                  Please do not spam requests. Kindly wait for the admin to review and process your
+                  submission.
                 </p>
               </div>
             </div>
@@ -1122,7 +1125,9 @@ export default function ClassLabAttemptsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground">Google Drive Link</label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Google Drive Link
+              </label>
               <Input
                 value={driveLink}
                 onChange={(event) => setDriveLink(event.target.value)}
@@ -1136,7 +1141,11 @@ export default function ClassLabAttemptsPage() {
               <Textarea
                 value={resubmitNote}
                 onChange={(event) => setResubmitNote(event.target.value)}
-                placeholder={requestType === "late" ? "Explain why this submission is late..." : "Message or explanation for admin..."}
+                placeholder={
+                  requestType === "late"
+                    ? "Explain why this submission is late..."
+                    : "Message or explanation for admin..."
+                }
                 className="min-h-[96px]"
                 aria-label="Resubmission note"
               />
@@ -1155,10 +1164,7 @@ export default function ClassLabAttemptsPage() {
             >
               Cancel
             </Button>
-            <Button
-              onClick={handleSaveResubmit}
-              disabled={!driveLink.trim() || submittingResubmit}
-            >
+            <Button onClick={handleSaveResubmit} disabled={!driveLink.trim() || submittingResubmit}>
               {requestType === "late" ? "Submit Late Request" : "Submit Request"}
             </Button>
           </DialogFooter>

@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { GraduationCap, Plus, Pencil, Trash2 } from "lucide-react";
 
@@ -30,8 +30,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TablePagination } from "@/components/admin/TablePagination";
-import { getTermsAction, createTermAction, updateTermAction, deleteTermAction } from "@/lib/actions/erd-admin";
+import { createTermAction, updateTermAction, deleteTermAction } from "@/lib/actions/erd-admin";
 import type { Term } from "@/lib/types/erd";
+import { adminQueryKeys, adminTermsQueryOptions } from "@/lib/queries/admin";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "—";
@@ -48,9 +49,8 @@ function formatDate(dateStr: string | null) {
 }
 
 export default function AdminTermsPage() {
-  const router = useRouter();
-  const [terms, setTerms] = useState<Term[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: terms = [], error, isPending: loading } = useQuery(adminTermsQueryOptions());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [startsOn, setStartsOn] = useState("");
@@ -104,7 +104,7 @@ export default function AdminTermsPage() {
       await updateTermAction(editTerm.id, editName, editStartsOn || null, editEndsOn || null);
       toast.success("Term updated.");
       setEditDialogOpen(false);
-      load();
+      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.terms() });
     } catch (err) {
       console.error("Failed to update term:", err);
       toast.error("Unable to update term.");
@@ -120,7 +120,7 @@ export default function AdminTermsPage() {
       await deleteTermAction(deleteTermId);
       toast.success("Term and all associated classes deleted.");
       setDeleteDialogOpen(false);
-      load();
+      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.all });
     } catch (err) {
       console.error("Failed to delete term:", err);
       toast.error("Unable to delete term.");
@@ -129,23 +129,11 @@ export default function AdminTermsPage() {
     }
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getTermsAction();
-      setTerms(data);
-      setCurrentPage(1);
-    } catch (err) {
-      console.error("Failed to load terms:", err);
-      toast.error("Unable to load terms.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!error) return;
+    console.error("Failed to load terms:", error);
+    toast.error("Unable to load terms.");
+  }, [error]);
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -160,7 +148,7 @@ export default function AdminTermsPage() {
       setName("");
       setStartsOn("");
       setEndsOn("");
-      load();
+      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.terms() });
     } catch (err) {
       console.error("Failed to create term:", err);
       toast.error("Unable to create term.");
@@ -176,7 +164,7 @@ export default function AdminTermsPage() {
   const paginatedTerms = terms.slice(startIndex, startIndex + pageSize);
 
   return (
-    <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
+    <div className="flex min-h-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:px-8 lg:pb-4 lg:pt-6">
       {/* Breadcrumbs và Action Bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
@@ -194,7 +182,7 @@ export default function AdminTermsPage() {
         </Button>
       </div>
 
-      <div className="space-y-6">
+      <div className="flex flex-1 flex-col">
         {loading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3].map((i) => (
@@ -227,7 +215,7 @@ export default function AdminTermsPage() {
             </Button>
           </Card>
         ) : (
-          <div className="space-y-6">
+          <div className="flex flex-1 flex-col gap-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {paginatedTerms.map((term) => (
                 <Link key={term.id} href={`/admin/terms/${term.id}/classes`}>
@@ -444,5 +432,3 @@ export default function AdminTermsPage() {
     </div>
   );
 }
-
-

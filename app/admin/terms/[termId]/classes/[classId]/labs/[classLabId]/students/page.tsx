@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState, Fragment } from "react";
 import { useParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Users, Search, CheckCircle2, XCircle, AlertCircle, FileText, Eye, History, ExternalLink, RefreshCw, TriangleAlert, Pencil, Trash2, ChevronDown, ChevronUp, FileJson, FileDown, FolderOpen } from "lucide-react";
 
@@ -47,18 +48,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  getClassLabStudentResultsAction,
-  getClassLabsForClassAction,
-  getClassesForTermAction,
-  getTermsAction,
-  getAdminClassLabSubmissionsAction,
-  getAdminStudentSubmissionsAction,
-  getAdminStudentResubmissionsAction,
   updateStudentSubmissionAction,
   deleteStudentSubmissionAction,
 } from "@/lib/actions/erd-admin";
 import type { ClassLabStudentResult, ClassLabSubmission, ResubmissionRequestV2, SubmissionStatus } from "@/lib/types/erd";
 import { cn } from "@/lib/utils";
+import {
+  adminClassLabStudentsQueryOptions,
+  adminClassLabSubmissionsQueryOptions,
+  adminQueryKeys,
+  adminStudentDetailsQueryOptions,
+} from "@/lib/queries/admin";
 
 function statusBadge(status: string | null) {
   if (!status) return <Badge variant="outline" className="font-medium">Not submitted</Badge>;
@@ -138,12 +138,18 @@ function getAttemptTestSummary(submission: ClassLabSubmission) {
 
 export default function AdminClassLabStudentsPage() {
   const params = useParams<{ termId: string; classId: string; classLabId: string }>();
-  const [results, setResults] = useState<ClassLabStudentResult[]>([]);
-  const [termName, setTermName] = useState("");
-  const [className, setClassName] = useState("");
-  const [labCode, setLabCode] = useState("");
-  const [labDriveRootUrl, setLabDriveRootUrl] = useState("");
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const resultsQueryOptions = adminClassLabStudentsQueryOptions(
+    params.termId,
+    params.classId,
+    params.classLabId
+  );
+  const { data, error, isPending: loading } = useQuery(resultsQueryOptions);
+  const results = data?.results ?? [];
+  const termName = data?.termName ?? "Term";
+  const className = data?.className ?? "Class";
+  const labCode = data?.labCode ?? "Lab";
+  const labDriveRootUrl = data?.labDriveRootUrl ?? "";
 
   // States cho Search và Filter
   const [searchQuery, setSearchQuery] = useState("");
@@ -171,20 +177,57 @@ export default function AdminClassLabStudentsPage() {
     setExpandedTests(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
+  const refreshResults = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: adminQueryKeys.classLabStudents(
+        params.termId,
+        params.classId,
+        params.classLabId
+      ),
+    });
+    return queryClient.fetchQuery(
+      adminClassLabStudentsQueryOptions(params.termId, params.classId, params.classLabId)
+    );
+  }, [params.classId, params.classLabId, params.termId, queryClient]);
+
+  const fetchStudentDetails = useCallback(
+    async (student: ClassLabStudentResult) =>
+      queryClient.fetchQuery(
+        adminStudentDetailsQueryOptions(
+          params.termId,
+          params.classId,
+          params.classLabId,
+          student.class_student_id,
+          student.attempt_count > 0
+        )
+      ),
+    [params.classId, params.classLabId, params.termId, queryClient]
+  );
+
   const handleViewDetails = useCallback(async (student: ClassLabStudentResult, keepSelectedAttemptId?: string | null) => {
     setSelectedStudent(student);
     setActiveTab("submission");
-    setSubmissions([]);
-    setResubmissions([]);
-    
-    setDetailLoading(true);
+    const detailOptions = adminStudentDetailsQueryOptions(
+      params.termId,
+      params.classId,
+      params.classLabId,
+      student.class_student_id,
+      student.attempt_count > 0
+    );
+    const cached = queryClient.getQueryData<{
+      submissions: ClassLabSubmission[];
+      resubmissions: ResubmissionRequestV2[];
+    }>(detailOptions.queryKey);
+    if (cached) {
+      setSubmissions(cached.submissions);
+      setResubmissions(cached.resubmissions);
+    } else {
+      setSubmissions([]);
+      setResubmissions([]);
+    }
+    setDetailLoading(!cached);
     try {
-      const [subs, resubs] = await Promise.all([
-        student.attempt_count > 0 
-          ? getAdminStudentSubmissionsAction(student.class_student_id, params.classLabId)
-          : Promise.resolve([]),
-        getAdminStudentResubmissionsAction(student.class_student_id, params.classLabId),
-      ]);
+      const { submissions: subs, resubmissions: resubs } = await fetchStudentDetails(student);
       setSubmissions(subs);
       setResubmissions(resubs);
       if (subs && subs.length > 0) {
@@ -199,7 +242,7 @@ export default function AdminClassLabStudentsPage() {
     } finally {
       setDetailLoading(false);
     }
-  }, [params.classLabId]);
+  }, [fetchStudentDetails, params.classId, params.classLabId, params.termId, queryClient]);
 
   // States cho Edit Submission
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -244,7 +287,7 @@ export default function AdminClassLabStudentsPage() {
       setIsEditOpen(false);
 
       // Reload danh sách ngoài
-      await load();
+      await refreshResults();
 
       // Cập nhật lại Dialog chi tiết nếu đang mở
       if (selectedStudent) {
@@ -266,12 +309,13 @@ export default function AdminClassLabStudentsPage() {
       setIsDeleteOpen(false);
 
       // Reload danh sách ngoài
-      await load();
+      const refreshed = await refreshResults();
 
       // Cập nhật lại Dialog chi tiết nếu đang mở
       if (selectedStudent) {
-        const updatedResults = await getClassLabStudentResultsAction(params.classLabId);
-        const updatedStudent = updatedResults.find(r => r.class_student_id === selectedStudent.class_student_id);
+        const updatedStudent = refreshed.results.find(
+          (row) => row.class_student_id === selectedStudent.class_student_id
+        );
         if (updatedStudent) {
           await handleViewDetails(updatedStudent, null);
         } else {
@@ -285,38 +329,11 @@ export default function AdminClassLabStudentsPage() {
     }
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [resultsData, labsData, classesData, termsData] = await Promise.all([
-        getClassLabStudentResultsAction(params.classLabId),
-        getClassLabsForClassAction(params.classId),
-        getClassesForTermAction(params.classId ? params.termId : ""), // Để an toàn nếu params thiếu
-        getTermsAction(),
-      ]);
-      setResults(resultsData);
-
-      const currentTerm = termsData.find((t) => t.id === params.termId);
-      setTermName(currentTerm ? currentTerm.name : "Term");
-
-      const currentClass = classesData.find((c) => c.id === params.classId);
-      setClassName(currentClass ? currentClass.name : "Class");
-
-      const currentLab = labsData.find((l) => l.id === params.classLabId);
-      setLabCode(currentLab ? currentLab.lab_code : "Lab");
-      setLabDriveRootUrl(currentLab?.drive_root_url || "");
-      setCurrentPage(1);
-    } catch (err) {
-      console.error("Failed to load student results:", err);
-      toast.error("Unable to load student results.");
-    } finally {
-      setLoading(false);
-    }
-  }, [params.classLabId, params.classId, params.termId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!error) return;
+    console.error("Failed to load student results:", error);
+    toast.error("Unable to load student results.");
+  }, [error]);
 
   // Reset trang khi bộ lọc thay đổi
   useEffect(() => {
@@ -362,7 +379,9 @@ export default function AdminClassLabStudentsPage() {
     setIsExporting(true);
     try {
       const XLSX = await import("xlsx");
-      const allSubmissions = await getAdminClassLabSubmissionsAction(params.classLabId);
+      const allSubmissions = await queryClient.fetchQuery(
+        adminClassLabSubmissionsQueryOptions(params.termId, params.classId, params.classLabId)
+      );
       const filteredStudentIds = new Set(filteredResults.map((row) => row.class_student_id));
       const studentById = new Map(filteredResults.map((row) => [row.class_student_id, row]));
       const exportSubmissions = allSubmissions.filter((submission) =>
@@ -428,7 +447,7 @@ export default function AdminClassLabStudentsPage() {
   };
 
   return (
-    <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
+    <div className="flex min-h-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:px-8 lg:pb-4 lg:pt-6">
       <AdminPageHeader
         breadcrumbs={[
           { label: "Terms", href: "/admin/terms" },
@@ -474,7 +493,12 @@ export default function AdminClassLabStudentsPage() {
               )}
               Export Excel
             </Button>
-            <Button size="sm" variant="outline" onClick={load} className="shadow-none">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => refreshResults()}
+              className="shadow-none"
+            >
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>
@@ -580,7 +604,7 @@ export default function AdminClassLabStudentsPage() {
       </div>
 
       {/* Bảng kết quả */}
-      <div className="space-y-4">
+      <div className="flex flex-1 flex-col gap-4">
         {loading ? (
           <div className="border border-border rounded-lg overflow-hidden bg-card">
             <div className="p-4 border-b border-border bg-muted/20 flex gap-4">
@@ -615,8 +639,8 @@ export default function AdminClassLabStudentsPage() {
             </p>
           </Card>
         ) : (
-          <div className="space-y-4">
-            <Card className="border border-border shadow-none rounded-lg overflow-hidden">
+          <div className="flex flex-1 flex-col gap-4">
+            <Card className="flex flex-1 flex-col overflow-hidden rounded-lg border border-border shadow-none">
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader className="bg-muted/20">
@@ -679,7 +703,7 @@ export default function AdminClassLabStudentsPage() {
                                   className="h-8 w-8 p-0"
                                   onClick={async () => {
                                     try {
-                                      const subs = await getAdminStudentSubmissionsAction(row.class_student_id, params.classLabId);
+                                      const { submissions: subs } = await fetchStudentDetails(row);
                                       if (subs && subs.length > 0) {
                                         handleOpenEdit(row.student_code, subs[0]);
                                       } else {
@@ -700,7 +724,7 @@ export default function AdminClassLabStudentsPage() {
                                   className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
                                   onClick={async () => {
                                     try {
-                                      const subs = await getAdminStudentSubmissionsAction(row.class_student_id, params.classLabId);
+                                      const { submissions: subs } = await fetchStudentDetails(row);
                                       if (subs && subs.length > 0) {
                                         handleOpenDelete(row.student_code, subs[0].id);
                                       } else {
@@ -724,23 +748,21 @@ export default function AdminClassLabStudentsPage() {
                   </TableBody>
                 </Table>
               </div>
-              <div className="px-5 pb-5">
-                <TablePagination
-                  pagination={{
-                    page: currentPage,
-                    pageSize: pageSize,
-                    total: total,
-                    totalPages: totalPages,
-                  }}
-                  loading={loading}
-                  onPageChange={setCurrentPage}
-                  onPageSizeChange={(size) => {
-                    setPageSize(size);
-                    setCurrentPage(1);
-                  }}
-                />
-              </div>
             </Card>
+            <TablePagination
+              pagination={{
+                page: currentPage,
+                pageSize: pageSize,
+                total: total,
+                totalPages: totalPages,
+              }}
+              loading={loading}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         )}
       </div>
@@ -1344,5 +1366,3 @@ export default function AdminClassLabStudentsPage() {
     </div>
   );
 }
-
-

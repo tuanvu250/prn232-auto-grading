@@ -2,8 +2,9 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
@@ -14,9 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
-import { queryCache } from "@/lib/utils/queryCache";
-import { getStudentLabOverviewAction } from "@/lib/actions/erd-student";
-import type { StudentClassLabOverview } from "@/lib/types/erd";
+import { studentLabOverviewQueryOptions } from "@/lib/queries/student";
 
 function statusBadge(status: string | null) {
   if (!status) return <Badge variant="outline">Not submitted</Badge>;
@@ -42,9 +41,13 @@ function deadlineLabel(deadline: string | null) {
 
 export default function StudentDashboardPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<UserPayload | null>(null);
-  const [labs, setLabs] = useState<StudentClassLabOverview[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: labs = [],
+    error: labsError,
+    isPending: loading,
+  } = useQuery(studentLabOverviewQueryOptions());
 
   useEffect(() => {
     const token = Cookies.get("authToken");
@@ -56,42 +59,20 @@ export default function StudentDashboardPage() {
       setUser(jwtDecode<UserPayload>(token));
     } catch {
       toast.error("Invalid session. Please sign in again.");
+      queryClient.clear();
       removeAuthCookie();
       router.push("/");
     }
-  }, [router]);
-
-  const loadLabs = useCallback(async () => {
-    const cached = queryCache.get<StudentClassLabOverview[]>("student-labs", 60000); // 1 minute stale time
-    if (cached.data) {
-      setLabs(cached.data);
-      setLoading(false);
-      if (!cached.isStale) {
-        return;
-      }
-    } else {
-      setLoading(true);
-    }
-
-    try {
-      const data = await getStudentLabOverviewAction();
-      setLabs(data);
-      queryCache.set("student-labs", data);
-    } catch (err) {
-      console.error("Failed to load lab overview:", err);
-      if (!cached.data) {
-        toast.error("Unable to load your labs.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  }, [queryClient, router]);
 
   useEffect(() => {
-    if (user) loadLabs();
-  }, [user, loadLabs]);
+    if (!labsError) return;
+    console.error("Failed to load lab overview:", labsError);
+    toast.error("Unable to load your labs.");
+  }, [labsError]);
 
   const handleLogout = () => {
+    queryClient.clear();
     removeAuthCookie();
     router.push("/");
   };
@@ -108,9 +89,7 @@ export default function StudentDashboardPage() {
             {user && (
               <div className="flex items-center gap-3">
                 <div className="hidden sm:flex flex-col items-end leading-tight select-none">
-                  <span className="text-xs font-bold text-foreground">
-                    {user.name}
-                  </span>
+                  <span className="text-xs font-bold text-foreground">{user.name}</span>
                   <span className="text-[10px] text-muted-foreground font-medium font-sans">
                     {user.email} {user.className ? `· ${user.className}` : ""}
                   </span>
@@ -163,9 +142,7 @@ export default function StudentDashboardPage() {
         ) : labs.length === 0 ? (
           <Card className="flex flex-col items-center gap-2 border-dashed p-10 text-center">
             <FileWarning className="h-8 w-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              No labs assigned to your class yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No labs assigned to your class yet.</p>
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -183,47 +160,46 @@ export default function StudentDashboardPage() {
                 }}
                 className="h-full cursor-pointer space-y-3 p-4 transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-foreground">{lab.lab_code}</p>
-                      {lab.lab_title ? (
-                        <p className="truncate text-xs text-muted-foreground">{lab.lab_title}</p>
-                      ) : null}
-                    </div>
-                    {statusBadge(lab.latest_status)}
-                  </div>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>
-                      Score:{" "}
-                      <span className="font-semibold text-foreground">
-                        {lab.latest_score !== null ? lab.latest_score.toFixed(2) : "—"}
-                      </span>
-                    </span>
-                    <span>{lab.attempt_count} attempt(s)</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-2 text-xs text-muted-foreground">
-                    <span className="truncate">{deadlineLabel(lab.deadline)}</span>
-                    {lab.drive_root_url ? (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          window.open(lab.drive_root_url || "", "_blank", "noopener,noreferrer");
-                        }}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 font-semibold text-foreground hover:border-primary/40 hover:text-primary"
-                      >
-                        <FolderOpen className="h-3.5 w-3.5" />
-                        Drive
-                        <ExternalLink className="h-3 w-3" />
-                      </button>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-foreground">{lab.lab_code}</p>
+                    {lab.lab_title ? (
+                      <p className="truncate text-xs text-muted-foreground">{lab.lab_title}</p>
                     ) : null}
                   </div>
+                  {statusBadge(lab.latest_status)}
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>
+                    Score:{" "}
+                    <span className="font-semibold text-foreground">
+                      {lab.latest_score !== null ? lab.latest_score.toFixed(2) : "—"}
+                    </span>
+                  </span>
+                  <span>{lab.attempt_count} attempt(s)</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-2 text-xs text-muted-foreground">
+                  <span className="truncate">{deadlineLabel(lab.deadline)}</span>
+                  {lab.drive_root_url ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        window.open(lab.drive_root_url || "", "_blank", "noopener,noreferrer");
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 font-semibold text-foreground hover:border-primary/40 hover:text-primary"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5" />
+                      Drive
+                      <ExternalLink className="h-3 w-3" />
+                    </button>
+                  ) : null}
+                </div>
               </Card>
             ))}
           </div>
         )}
       </main>
-
     </div>
   );
 }

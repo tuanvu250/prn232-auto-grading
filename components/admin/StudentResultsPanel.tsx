@@ -207,7 +207,7 @@ export function StudentResultsPanel({
   const currentStep = selectedLab ? "detail" : selectedClass ? "labs" : "classes";
 
   return (
-    <section className="motion-panel space-y-6">
+    <section className="motion-panel flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
         <nav
           aria-label="Student results path"
@@ -362,7 +362,7 @@ export function StudentResultsPanel({
       ) : null}
 
       {selectedClass && selectedLab ? (
-        <div className="space-y-4">
+        <div className="flex flex-1 flex-col gap-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="font-semibold text-muted-foreground">3. Detail table:</span>
