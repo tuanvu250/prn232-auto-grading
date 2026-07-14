@@ -4,7 +4,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
@@ -31,20 +32,19 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TablePagination } from "@/components/admin/TablePagination";
 import {
-  getClassesForTermAction,
   createClassAction,
-  getTermsAction,
   updateClassAction,
   deleteClassAction,
 } from "@/lib/actions/erd-admin";
 import type { ClassRow } from "@/lib/types/erd";
+import { adminClassesQueryOptions, adminQueryKeys } from "@/lib/queries/admin";
 
 export default function AdminClassesPage() {
   const params = useParams<{ termId: string }>();
-  const router = useRouter();
-  const [classes, setClasses] = useState<ClassRow[]>([]);
-  const [termName, setTermName] = useState("");
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data, error, isPending: loading } = useQuery(adminClassesQueryOptions(params.termId));
+  const classes = data?.classes ?? [];
+  const termName = data?.termName ?? "Term";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -88,7 +88,7 @@ export default function AdminClassesPage() {
       await updateClassAction(editClass.id, editName);
       toast.success("Class updated.");
       setEditDialogOpen(false);
-      load();
+      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.classes(params.termId) });
     } catch (err) {
       console.error("Failed to update class:", err);
       toast.error("Unable to update class.");
@@ -104,7 +104,8 @@ export default function AdminClassesPage() {
       await deleteClassAction(deleteClassId);
       toast.success("Class and all associated results deleted.");
       setDeleteDialogOpen(false);
-      load();
+      setCurrentPage(1);
+      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.classes(params.termId) });
     } catch (err) {
       console.error("Failed to delete class:", err);
       toast.error("Unable to delete class.");
@@ -117,28 +118,11 @@ export default function AdminClassesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [classesData, termsData] = await Promise.all([
-        getClassesForTermAction(params.termId),
-        getTermsAction(),
-      ]);
-      setClasses(classesData);
-      const currentTerm = termsData.find((t) => t.id === params.termId);
-      setTermName(currentTerm ? currentTerm.name : "Term");
-      setCurrentPage(1);
-    } catch (err) {
-      console.error("Failed to load classes:", err);
-      toast.error("Unable to load classes.");
-    } finally {
-      setLoading(false);
-    }
-  }, [params.termId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!error) return;
+    console.error("Failed to load classes:", error);
+    toast.error("Unable to load classes.");
+  }, [error]);
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -151,7 +135,8 @@ export default function AdminClassesPage() {
       toast.success("Class created.");
       setDialogOpen(false);
       setName("");
-      load();
+      setCurrentPage(1);
+      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.classes(params.termId) });
     } catch (err) {
       console.error("Failed to create class:", err);
       toast.error("Unable to create class.");
@@ -167,7 +152,7 @@ export default function AdminClassesPage() {
   const paginatedClasses = classes.slice(startIndex, startIndex + pageSize);
 
   return (
-    <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
+    <div className="flex min-h-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:px-8 lg:pb-4 lg:pt-6">
       {/* Breadcrumbs và Action Bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1.5">
@@ -208,7 +193,7 @@ export default function AdminClassesPage() {
         </Button>
       </div>
 
-      <div className="space-y-6">
+      <div className="flex flex-1 flex-col">
         {loading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3].map((i) => (
@@ -236,7 +221,7 @@ export default function AdminClassesPage() {
             </Button>
           </Card>
         ) : (
-          <div className="space-y-6">
+          <div className="flex flex-1 flex-col gap-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {paginatedClasses.map((cls) => (
                 <Link
@@ -403,5 +388,3 @@ export default function AdminClassesPage() {
     </div>
   );
 }
-
-

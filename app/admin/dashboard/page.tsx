@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
@@ -13,14 +14,17 @@ import { Button } from "@/components/ui/button";
 import { ROLE_ADMIN } from "@/lib/types/roles";
 import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 import {
-  getAllowedEmailsAction,
   saveAllowedEmailAction,
   deleteAllowedEmailAction,
   importAllowedEmailsAction,
-  getAdminResubmissionsAction,
   updateResubmissionStatusAction,
-  getAdminDashboardStatsAction,
 } from "@/lib/actions/admin";
+import {
+  adminDashboardAccessQueryOptions,
+  adminDashboardOverviewQueryOptions,
+  adminDashboardResubmissionsQueryOptions,
+  adminQueryKeys,
+} from "@/lib/queries/admin";
 import {
   AllowedEmail,
   ResubmissionRequest,
@@ -130,6 +134,7 @@ function parseStudentCsv(content: string): CsvStudentRow[] {
 
 export default function AdminDashboardPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get("view");
   const [user, setUser] = useState<UserPayload | null>(null);
@@ -182,10 +187,15 @@ export default function AdminDashboardPage() {
     classNames: [],
   });
 
-  const fetchOverviewData = async () => {
-    setLoadingOverview(true);
+  const fetchOverviewData = async (force = false) => {
+    const options = adminDashboardOverviewQueryOptions();
+    const cached = queryClient.getQueryData(options.queryKey);
+    setLoadingOverview(!cached);
     try {
-      const json = await getAdminDashboardStatsAction();
+      if (force) {
+        await queryClient.invalidateQueries({ queryKey: options.queryKey });
+      }
+      const json = await queryClient.fetchQuery(options);
       if (!json.success) {
         toast.error(json.error || "Unable to load dashboard overview.");
         return;
@@ -209,7 +219,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (!user || activeView !== "overview") return;
-    fetchOverviewData();
+    fetchOverviewData(false);
   }, [user, activeView]);
 
   useEffect(() => {
@@ -233,15 +243,21 @@ export default function AdminDashboardPage() {
     }
   }, [router]);
 
-  const fetchRequests = async () => {
-    setLoadingRequests(true);
+  const fetchRequests = async (force = true) => {
+    const filters = {
+      status: requestStatus,
+      page: requestPagination.page,
+      pageSize: requestPagination.pageSize,
+      q: debouncedRequestQuery.trim() || undefined,
+    };
+    const options = adminDashboardResubmissionsQueryOptions(filters);
+    const cached = queryClient.getQueryData(options.queryKey);
+    setLoadingRequests(!cached);
     try {
-      const json = await getAdminResubmissionsAction({
-        status: requestStatus,
-        page: requestPagination.page,
-        pageSize: requestPagination.pageSize,
-        q: debouncedRequestQuery.trim() || undefined,
-      });
+      if (force) {
+        await queryClient.invalidateQueries({ queryKey: options.queryKey });
+      }
+      const json = await queryClient.fetchQuery(options);
 
       if (!json.success) {
         toast.error(json.error || "Unable to load requests.");
@@ -259,15 +275,21 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const fetchAllowedEmails = async () => {
-    setLoadingAccess(true);
+  const fetchAllowedEmails = async (force = true) => {
+    const filters = {
+      page: accessPagination.page,
+      pageSize: accessPagination.pageSize,
+      q: debouncedAccessQuery.trim() || undefined,
+      className: accessClassFilter !== "all" ? accessClassFilter : undefined,
+    };
+    const options = adminDashboardAccessQueryOptions(filters);
+    const cached = queryClient.getQueryData(options.queryKey);
+    setLoadingAccess(!cached);
     try {
-      const json = await getAllowedEmailsAction({
-        page: accessPagination.page,
-        pageSize: accessPagination.pageSize,
-        q: debouncedAccessQuery.trim() || undefined,
-        className: accessClassFilter !== "all" ? accessClassFilter : undefined,
-      });
+      if (force) {
+        await queryClient.invalidateQueries({ queryKey: options.queryKey });
+      }
+      const json = await queryClient.fetchQuery(options);
 
       if (!json.success) {
         toast.error(json.error || "Unable to load student access.");
@@ -295,7 +317,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (!user) return;
-    fetchRequests();
+    fetchRequests(false);
   }, [
     user,
     requestStatus,
@@ -306,7 +328,7 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (!user || activeView !== "studentAccess") return;
-    fetchAllowedEmails();
+    fetchAllowedEmails(false);
   }, [
     user,
     activeView,
@@ -341,6 +363,12 @@ export default function AdminDashboardPage() {
         setRejectTarget(null);
         setRejectNote("");
       }
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: [...adminQueryKeys.dashboard(), "resubmissions"],
+        }),
+        queryClient.invalidateQueries({ queryKey: adminQueryKeys.dashboardOverview() }),
+      ]);
       const nextPage =
         requests.length === 1 && requestPagination.page > 1
           ? requestPagination.page - 1
@@ -398,6 +426,9 @@ export default function AdminDashboardPage() {
 
       toast.success(editingEmail ? "Student updated." : "Student added.");
       resetAccessForm();
+      await queryClient.invalidateQueries({
+        queryKey: [...adminQueryKeys.dashboard(), "access"],
+      });
       setAccessPagination((prev) => ({ ...prev, page: 1 }));
       if (accessPagination.page === 1) fetchAllowedEmails();
     } catch (err) {
@@ -421,6 +452,9 @@ export default function AdminDashboardPage() {
       toast.success("Student deleted.");
       if (editingEmail === deleteTarget.email) resetAccessForm();
       setDeleteTarget(null);
+      await queryClient.invalidateQueries({
+        queryKey: [...adminQueryKeys.dashboard(), "access"],
+      });
       const nextPage =
         allowedEmails.length === 1 && accessPagination.page > 1
           ? accessPagination.page - 1
@@ -459,6 +493,9 @@ export default function AdminDashboardPage() {
           details.length ? ` ${details.join(", ")}.` : ""
         }`
       );
+      await queryClient.invalidateQueries({
+        queryKey: [...adminQueryKeys.dashboard(), "access"],
+      });
       setAccessPagination((prev) => ({ ...prev, page: 1 }));
       if (accessPagination.page === 1) fetchAllowedEmails();
     } catch (err) {
@@ -478,7 +515,7 @@ export default function AdminDashboardPage() {
   }
 
   return (
-    <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
+    <div className="flex min-h-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:px-8 lg:pb-4 lg:pt-6">
       {activeView === "overview" ? (
         loadingOverview && !overviewData ? (
           <OverviewSkeleton />
@@ -578,4 +615,3 @@ export default function AdminDashboardPage() {
     </div>
   );
 }
-

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft, Calendar as CalendarIcon, Code2, Plus, X, Pencil, Trash2, FileSpreadsheet, Upload, RefreshCw, Search, Users, FolderOpen, ExternalLink } from "lucide-react";
 
@@ -51,18 +52,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  getClassLabsForClassAction,
-  getLabCatalogAction,
   createLabAction,
   assignLabToClassAction,
-  getClassesForTermAction,
-  getTermsAction,
   updateClassLabDeadlineAction,
   deleteClassLabAction,
-  getClassStudentsForClassAction,
   importClassStudentsAction,
 } from "@/lib/actions/erd-admin";
-import type { ClassLab, ClassStudentRosterRow, Lab } from "@/lib/types/erd";
+import type { ClassLab } from "@/lib/types/erd";
+import { adminClassWorkspaceQueryOptions, adminQueryKeys } from "@/lib/queries/admin";
 
 function getDeadlineBadge(deadlineStr: string | null) {
   if (!deadlineStr) {
@@ -200,12 +197,7 @@ function buildImportPreview(
 
 export default function AdminClassLabsPage() {
   const params = useParams<{ termId: string; classId: string }>();
-  const [classLabs, setClassLabs] = useState<ClassLab[]>([]);
-  const [students, setStudents] = useState<ClassStudentRosterRow[]>([]);
-  const [catalog, setCatalog] = useState<Lab[]>([]);
-  const [termName, setTermName] = useState("");
-  const [className, setClassName] = useState("");
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [existingLabId, setExistingLabId] = useState("");
   const [newLabCode, setNewLabCode] = useState("");
@@ -247,6 +239,27 @@ export default function AdminClassLabsPage() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>(emptyMapping);
 
+  const { data, error, isPending: loading } = useQuery(
+    adminClassWorkspaceQueryOptions(params.termId, params.classId)
+  );
+  const classLabs = data?.classLabs ?? [];
+  const students = data?.students ?? [];
+  const catalog = data?.catalog ?? [];
+  const termName = data?.termName ?? "Term";
+  const className = data?.className ?? "Class";
+
+  const refreshWorkspace = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: adminQueryKeys.classWorkspace(params.termId, params.classId),
+    });
+  }, [params.classId, params.termId, queryClient]);
+
+  useEffect(() => {
+    if (!error) return;
+    console.error("Failed to load class labs:", error);
+    toast.error("Unable to load labs.");
+  }, [error]);
+
   const handleOpenEditDeadline = useCallback((cl: ClassLab, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -271,7 +284,7 @@ export default function AdminClassLabsPage() {
       await updateClassLabDeadlineAction(editClassLab.id, editDeadline || null, editDriveRootUrl || null);
       toast.success("Lab submission settings updated.");
       setEditDeadlineOpen(false);
-      load();
+      await refreshWorkspace();
     } catch (err) {
       console.error("Failed to update deadline:", err);
       toast.error("Unable to update deadline.");
@@ -287,7 +300,7 @@ export default function AdminClassLabsPage() {
       await deleteClassLabAction(deleteClassLabId);
       toast.success("Lab unassigned from class.");
       setDeleteDialogOpen(false);
-      load();
+      await refreshWorkspace();
     } catch (err) {
       console.error("Failed to unassign lab:", err);
       toast.error("Unable to unassign lab.");
@@ -374,7 +387,8 @@ export default function AdminClassLabsPage() {
       toast.success(`Added ${result.imported} student${result.imported === 1 ? "" : "s"}.`);
       setIsAddStudentOpen(false);
       setAddStudentForm({ studentCode: "", email: "", name: "" });
-      await load();
+      setStudentCurrentPage(1);
+      await refreshWorkspace();
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Failed to add student."));
     } finally {
@@ -396,7 +410,8 @@ export default function AdminClassLabsPage() {
       toast.success(`Imported ${result.imported} student${result.imported === 1 ? "" : "s"}${result.skipped ? `, skipped ${result.skipped}` : ""}.`);
       setIsImportOpen(false);
       resetImportState();
-      await load();
+      setStudentCurrentPage(1);
+      await refreshWorkspace();
     } catch (err: unknown) {
       toast.error(getErrorMessage(err, "Failed to import students."));
     } finally {
@@ -421,38 +436,6 @@ export default function AdminClassLabsPage() {
       })()
     : "Pick a date";
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [labs, roster, allLabs, classesData, termsData] = await Promise.all([
-        getClassLabsForClassAction(params.classId),
-        getClassStudentsForClassAction(params.classId),
-        getLabCatalogAction(),
-        getClassesForTermAction(params.termId),
-        getTermsAction(),
-      ]);
-      setClassLabs(labs);
-      setStudents(roster);
-      setCatalog(allLabs);
-
-      const currentTerm = termsData.find((t) => t.id === params.termId);
-      setTermName(currentTerm ? currentTerm.name : "Term");
-
-      const currentClass = classesData.find((c) => c.id === params.classId);
-      setClassName(currentClass ? currentClass.name : "Class");
-      setStudentCurrentPage(1);
-    } catch (err) {
-      console.error("Failed to load class labs:", err);
-      toast.error("Unable to load labs.");
-    } finally {
-      setLoading(false);
-    }
-  }, [params.classId, params.termId, setStudentCurrentPage]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
   const handleAssign = async () => {
     setSaving(true);
     try {
@@ -474,7 +457,7 @@ export default function AdminClassLabsPage() {
       setNewLabTitle("");
       setDeadline("");
       setDriveRootUrl("");
-      load();
+      await refreshWorkspace();
     } catch (err) {
       console.error("Failed to assign lab:", err);
       toast.error("Unable to assign lab.");
@@ -516,7 +499,7 @@ export default function AdminClassLabsPage() {
     !isImportingStudents;
 
   return (
-    <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:px-8 lg:py-6">
+    <div className="flex min-h-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:px-8 lg:pb-4 lg:pt-6">
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <Button
           variant="outline"
@@ -674,7 +657,7 @@ export default function AdminClassLabsPage() {
         )}
       </div>
 
-      <section className="space-y-4 border-t border-border pt-6">
+      <section className="flex flex-1 flex-col gap-4 border-t border-border pt-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <h2 className="text-lg font-bold tracking-tight text-foreground">
@@ -747,7 +730,7 @@ export default function AdminClassLabsPage() {
             ) : null}
           </Card>
         ) : (
-          <div className="space-y-4">
+          <div className="flex flex-1 flex-col gap-4">
             <Card className="border border-border shadow-none rounded-lg overflow-hidden">
               <div className="overflow-x-auto">
                 <Table>
@@ -1343,5 +1326,3 @@ export default function AdminClassLabsPage() {
     </div>
   );
 }
-
-

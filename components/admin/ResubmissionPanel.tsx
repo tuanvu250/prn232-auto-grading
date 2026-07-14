@@ -90,7 +90,7 @@ export function ResubmissionPanel({
   onReject,
 }: ResubmissionPanelProps) {
   return (
-    <section className="motion-panel space-y-4">
+    <section className="motion-panel flex flex-1 flex-col gap-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         {/* Inline Metrics */}
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -265,7 +265,7 @@ export function ResubmissionPanel({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="flex flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
         <div className="overflow-x-auto">
           <Table className="min-w-[980px]">
             <TableHeader className="bg-muted/50">
@@ -413,15 +413,13 @@ export function ResubmissionPanel({
             </TableBody>
           </Table>
         </div>
-        <div className="px-4 pb-4">
-          <TablePagination
-            pagination={pagination}
-            loading={loading}
-            onPageChange={onPageChange}
-            onPageSizeChange={onPageSizeChange}
-          />
-        </div>
       </div>
+      <TablePagination
+        pagination={pagination}
+        loading={loading}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
     </section>
   );
 }
