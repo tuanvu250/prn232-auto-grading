@@ -37,7 +37,9 @@ export async function googleLoginAction(email: string) {
       return { success: false, error: "Email is not allowed" };
     }
 
-    const classStudents = student.class_students as any[];
+    const classStudents = student.class_students as unknown as Array<{
+      classes: { name: string } | null;
+    }>;
     const className = classStudents?.[0]?.classes?.name || "";
 
     return {

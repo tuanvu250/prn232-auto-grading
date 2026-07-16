@@ -1,119 +1,89 @@
 "use server";
 
-import { supabaseServer } from "@/lib/server/supabase";
 import { getServerUser, userIsAdmin } from "@/lib/server/auth";
+import { supabaseServer } from "@/lib/server/supabase";
 import type {
-  Term,
   ClassRow,
-  ClassLab,
   ClassStudentRosterRow,
-  ClassLabStudentResult,
-  ClassLabSubmission,
-  ResubmissionRequestV2,
+  GradingSession,
+  GradingSessionStatus,
+  GradingSessionStudentResult,
+  SessionSubmission,
+  SubmissionStatus,
+  Term,
 } from "@/lib/types/erd";
+import {
+  normalizeOptionalUrl,
+  normalizeSessionDeadline,
+  uniqueIds,
+} from "@/lib/utils/grading-session";
 
 async function requireAdmin() {
   const user = await getServerUser();
-  if (!user || !userIsAdmin(user)) {
-    throw new Error("Forbidden: admin access required");
-  }
+  if (!user || !userIsAdmin(user)) throw new Error("Forbidden: admin access required");
 }
 
 export async function getTermsAction(): Promise<Term[]> {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
     .from("terms")
     .select("id, name, starts_on, ends_on")
     .order("starts_on", { ascending: false });
-
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 export async function getClassesForTermAction(termId: string): Promise<ClassRow[]> {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
     .from("classes")
     .select("id, term_id, name")
     .eq("term_id", termId)
     .order("name");
-
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
-export async function getClassLabsForClassAction(classId: string): Promise<ClassLab[]> {
+export async function getGradingSessionsForClassAction(classId: string): Promise<GradingSession[]> {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
-    .from("class_labs")
-    .select("id, class_id, lab_id, deadline, drive_root_url, labs(code, title)")
+    .from("grading_sessions")
+    .select(
+      "id, class_id, lab_id, name, deadline, drive_root_url, status, created_at, labs(code, title)"
+    )
     .eq("class_id", classId)
-    .order("id");
-
+    .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
 
-  interface ClassLabJoinRow {
-    id: string;
-    class_id: string;
-    lab_id: string;
-    deadline: string | null;
-    drive_root_url: string | null;
+  type JoinRow = Omit<GradingSession, "lab_code" | "lab_title"> & {
     labs: { code: string; title: string | null } | null;
-  }
+  };
 
-  return ((data ?? []) as unknown as ClassLabJoinRow[]).map((row) => ({
-    id: row.id,
-    class_id: row.class_id,
-    lab_id: row.lab_id,
-    deadline: row.deadline,
-    drive_root_url: row.drive_root_url ?? null,
-    lab_code: row.labs?.code ?? "",
-    lab_title: row.labs?.title ?? null,
+  return ((data ?? []) as unknown as JoinRow[]).map(({ labs, ...session }) => ({
+    ...session,
+    lab_code: labs?.code ?? "",
+    lab_title: labs?.title ?? null,
   }));
-}
-
-export async function getClassLabStudentResultsAction(
-  classLabId: string
-): Promise<ClassLabStudentResult[]> {
-  await requireAdmin();
-
-  const { data, error } = await supabaseServer.rpc(
-    "admin_class_lab_student_results",
-    { p_class_lab_id: classLabId }
-  );
-
-  if (error) throw new Error(error.message);
-  return data ?? [];
 }
 
 export async function getClassStudentsForClassAction(
   classId: string
 ): Promise<ClassStudentRosterRow[]> {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
     .from("class_students")
     .select("id, student_id, students!inner(id, email, student_code, name)")
     .eq("class_id", classId)
     .order("student_code", { referencedTable: "students", ascending: true });
-
   if (error) throw new Error(error.message);
 
-  interface ClassStudentJoinRow {
+  type JoinRow = {
     id: string;
     student_id: string;
-    students: {
-      id: string;
-      email: string;
-      student_code: string;
-      name: string | null;
-    } | null;
-  }
+    students: { id: string; email: string; student_code: string; name: string | null } | null;
+  };
 
-  return ((data ?? []) as unknown as ClassStudentJoinRow[]).map((row) => ({
+  return ((data ?? []) as unknown as JoinRow[]).map((row) => ({
     class_student_id: row.id,
     student_id: row.student_id || row.students?.id || "",
     student_code: row.students?.student_code ?? "",
@@ -122,203 +92,243 @@ export async function getClassStudentsForClassAction(
   }));
 }
 
-// Lab catalog management (step 2 of phase-05) -------------------------------------
-
 export async function getLabCatalogAction() {
   await requireAdmin();
-
-  const { data, error } = await supabaseServer
-    .from("labs")
-    .select("id, code, title")
-    .order("code");
-
+  const { data, error } = await supabaseServer.from("labs").select("id, code, title").order("code");
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 export async function createLabAction(code: string, title: string | null) {
   await requireAdmin();
-
   const normalizedCode = code.trim().toUpperCase();
   if (!normalizedCode) throw new Error("Lab code is required");
-
   const { data, error } = await supabaseServer
     .from("labs")
     .insert({ code: normalizedCode, title: title?.trim() || null })
     .select("id, code, title")
     .single();
-
   if (error) throw new Error(error.message);
   return data;
 }
 
-export async function assignLabToClassAction(
-  classId: string,
-  labId: string,
-  deadline: string | null,
-  driveRootUrl: string | null = null
-) {
-  await requireAdmin();
-
-  const { data, error } = await supabaseServer
-    .from("class_labs")
-    .insert({
-      class_id: classId,
-      lab_id: labId,
-      deadline,
-      drive_root_url: driveRootUrl?.trim() || null,
-    })
-    .select("id, class_id, lab_id, deadline")
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
+export interface CreateGradingSessionsInput {
+  termId: string;
+  targets: Array<{ classId: string; driveRootUrl: string }>;
+  labId: string;
+  name: string;
+  deadline: string | null;
 }
 
-export async function updateClassLabDeadlineAction(
-  classLabId: string,
-  deadline: string | null,
-  driveRootUrl?: string | null
-) {
+export async function createGradingSessionsAction(input: CreateGradingSessionsInput) {
   await requireAdmin();
-
-  const payload: { deadline: string | null; drive_root_url?: string | null } = { deadline };
-  if (driveRootUrl !== undefined) {
-    payload.drive_root_url = driveRootUrl?.trim() || null;
+  const targetsByClass = new Map(
+    input.targets.map((target) => [target.classId.trim(), target.driveRootUrl])
+  );
+  const classIds = uniqueIds([...targetsByClass.keys()]);
+  const name = input.name.trim();
+  if (!input.termId || !input.labId || !name || classIds.length === 0) {
+    throw new Error("Term, lab, session name and at least one class are required");
   }
 
-  const { error } = await supabaseServer
-    .from("class_labs")
-    .update(payload)
-    .eq("id", classLabId);
+  const deadline = normalizeSessionDeadline(input.deadline);
+  const targets = classIds.map((classId) => ({
+    classId,
+    driveRootUrl: normalizeOptionalUrl(targetsByClass.get(classId)),
+  }));
+  const { data: classes, error: classesError } = await supabaseServer
+    .from("classes")
+    .select("id")
+    .eq("term_id", input.termId)
+    .in("id", classIds);
+  if (classesError) throw new Error(classesError.message);
+  if ((classes ?? []).length !== classIds.length) {
+    throw new Error("Every selected class must belong to the current term");
+  }
 
+  const { data: conflicts, error: conflictError } = await supabaseServer
+    .from("grading_sessions")
+    .select("class_id, classes(name)")
+    .eq("lab_id", input.labId)
+    .eq("status", "open")
+    .in("class_id", classIds);
+  if (conflictError) throw new Error(conflictError.message);
+  if (conflicts?.length) {
+    const names = conflicts
+      .map((row) => {
+        const joined = Array.isArray(row.classes) ? row.classes[0] : row.classes;
+        return joined?.name ?? row.class_id;
+      })
+      .join(", ");
+    throw new Error(`An open session already exists for this lab in: ${names}`);
+  }
+
+  const { data, error } = await supabaseServer
+    .from("grading_sessions")
+    .insert(
+      targets.map((target) => ({
+        class_id: target.classId,
+        lab_id: input.labId,
+        name,
+        deadline,
+        drive_root_url: target.driveRootUrl,
+        status: "open" as const,
+      }))
+    )
+    .select("id, class_id");
   if (error) throw new Error(error.message);
+  return { created: data?.length ?? 0, sessions: data ?? [] };
 }
 
-export async function createTermAction(
-  name: string,
-  startsOn: string | null,
-  endsOn: string | null
+export async function updateGradingSessionAction(
+  sessionId: string,
+  input: {
+    name: string;
+    deadline: string | null;
+    driveRootUrl: string | null;
+    status: GradingSessionStatus;
+  }
 ) {
   await requireAdmin();
-
+  const name = input.name.trim();
+  if (!name) throw new Error("Session name is required");
+  const deadline = input.deadline
+    ? normalizeSessionDeadline(input.deadline, input.status === "closed")
+    : null;
   const { data, error } = await supabaseServer
-    .from("terms")
-    .insert({ name: name.trim(), starts_on: startsOn, ends_on: endsOn })
-    .select("id, name, starts_on, ends_on")
+    .from("grading_sessions")
+    .update({
+      name,
+      deadline,
+      drive_root_url: normalizeOptionalUrl(input.driveRootUrl),
+      status: input.status,
+    })
+    .eq("id", sessionId)
+    .select("id")
     .single();
-
   if (error) throw new Error(error.message);
   return data;
 }
 
-export async function createClassAction(termId: string, name: string) {
+export async function deleteGradingSessionAction(sessionId: string) {
   await requireAdmin();
+  const { count, error: countError } = await supabaseServer
+    .from("session_submissions")
+    .select("id", { count: "exact", head: true })
+    .eq("grading_session_id", sessionId);
+  if (countError) throw new Error(countError.message);
+  if ((count ?? 0) > 0) throw new Error("Close sessions with submissions instead of deleting them");
 
-  const { data, error } = await supabaseServer
-    .from("classes")
-    .insert({ term_id: termId, name: name.trim().toUpperCase() })
-    .select("id, term_id, name")
-    .single();
-
+  const { error } = await supabaseServer.from("grading_sessions").delete().eq("id", sessionId);
   if (error) throw new Error(error.message);
-  return data;
+  return { success: true };
+}
+
+export async function getGradingSessionStudentResultsAction(
+  sessionId: string
+): Promise<GradingSessionStudentResult[]> {
+  await requireAdmin();
+  const { data: session, error: sessionError } = await supabaseServer
+    .from("grading_sessions")
+    .select("class_id")
+    .eq("id", sessionId)
+    .single();
+  if (sessionError) throw new Error(sessionError.message);
+
+  const [roster, submissionResult] = await Promise.all([
+    getClassStudentsForClassAction(session.class_id),
+    supabaseServer
+      .from("session_submissions")
+      .select("class_student_id, attempt_no, score, status")
+      .eq("grading_session_id", sessionId)
+      .order("attempt_no", { ascending: false }),
+  ]);
+  if (submissionResult.error) throw new Error(submissionResult.error.message);
+
+  const byStudent = new Map<string, typeof submissionResult.data>();
+  for (const row of submissionResult.data ?? []) {
+    const rows = byStudent.get(row.class_student_id) ?? [];
+    rows.push(row);
+    byStudent.set(row.class_student_id, rows);
+  }
+
+  return roster.map((student) => {
+    const attempts = byStudent.get(student.class_student_id) ?? [];
+    const latest = attempts[0];
+    return {
+      class_student_id: student.class_student_id,
+      student_code: student.student_code,
+      student_name: student.student_name,
+      student_email: student.student_email,
+      attempt_count: attempts.length,
+      latest_attempt_no: latest?.attempt_no ?? null,
+      latest_score: latest?.score ?? null,
+      latest_status: (latest?.status as SubmissionStatus | undefined) ?? null,
+    };
+  });
 }
 
 export async function getAdminStudentSubmissionsAction(
   classStudentId: string,
-  classLabId: string
-): Promise<ClassLabSubmission[]> {
+  sessionId: string
+): Promise<SessionSubmission[]> {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
-    .from("class_lab_submissions")
+    .from("session_submissions")
     .select("*")
     .eq("class_student_id", classStudentId)
-    .eq("class_lab_id", classLabId)
+    .eq("grading_session_id", sessionId)
     .order("attempt_no", { ascending: false });
-
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
-export async function getAdminClassLabSubmissionsAction(
-  classLabId: string
-): Promise<ClassLabSubmission[]> {
+export async function getAdminSessionSubmissionsAction(
+  sessionId: string
+): Promise<SessionSubmission[]> {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
-    .from("class_lab_submissions")
+    .from("session_submissions")
     .select("*")
-    .eq("class_lab_id", classLabId)
-    .order("class_student_id", { ascending: true })
+    .eq("grading_session_id", sessionId)
+    .order("class_student_id")
     .order("attempt_no", { ascending: false });
-
-  if (error) throw new Error(error.message);
-  return data ?? [];
-}
-
-export async function getAdminStudentResubmissionsAction(
-  classStudentId: string,
-  classLabId: string
-): Promise<ResubmissionRequestV2[]> {
-  await requireAdmin();
-
-  const { data, error } = await supabaseServer
-    .from("resubmission_requests_v2")
-    .select("*")
-    .eq("class_student_id", classStudentId)
-    .eq("class_lab_id", classLabId)
-    .order("created_at", { ascending: false });
-
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 export async function updateStudentSubmissionAction(
   submissionId: string,
-  payload: { score: number; status: "passed" | "failed" | "grading"; sourceUrl: string }
+  payload: { score: number; status: SubmissionStatus; sourceUrl: string }
 ) {
   await requireAdmin();
-
-  const { score, status, sourceUrl } = payload;
-
   const { data, error } = await supabaseServer
-    .from("class_lab_submissions")
+    .from("session_submissions")
     .update({
-      score,
-      status,
-      source_url: sourceUrl,
+      score: payload.score,
+      status: payload.status,
+      source_url: payload.sourceUrl.trim() || null,
       graded_at: new Date().toISOString(),
     })
     .eq("id", submissionId)
     .select()
     .single();
-
   if (error) throw new Error(error.message);
   return data;
 }
 
 export async function deleteStudentSubmissionAction(submissionId: string) {
   await requireAdmin();
-
-  // Xóa các resubmission requests liên kết trước (do constraint ON DELETE RESTRICT)
-  const { error: deleteRequestsError } = await supabaseServer
+  const { count, error: requestError } = await supabaseServer
     .from("resubmission_requests_v2")
-    .delete()
+    .select("id", { count: "exact", head: true })
     .eq("submission_id", submissionId);
-
-  if (deleteRequestsError) {
-    throw new Error(`Failed to clean up linked resubmission requests: ${deleteRequestsError.message}`);
-  }
-
-  // Xóa submission
+  if (requestError) throw new Error(requestError.message);
+  if ((count ?? 0) > 0) throw new Error("This legacy attempt is retained for request audit");
   const { error } = await supabaseServer
-    .from("class_lab_submissions")
+    .from("session_submissions")
     .delete()
-    .eq("id", submissionId)
-    .select();
-
+    .eq("id", submissionId);
   if (error) throw new Error(error.message);
   return { success: true };
 }
@@ -329,12 +339,8 @@ export interface ImportClassStudentRow {
   name: string;
 }
 
-export async function importClassStudentsAction(
-  classId: string,
-  rows: ImportClassStudentRow[]
-) {
+export async function importClassStudentsAction(classId: string, rows: ImportClassStudentRow[]) {
   await requireAdmin();
-
   const normalizedRows = rows
     .map((row) => ({
       email: row.email.trim().toLowerCase(),
@@ -342,52 +348,64 @@ export async function importClassStudentsAction(
       name: row.name.trim(),
     }))
     .filter((row) => row.email && row.student_code && row.name);
-
   if (!classId) throw new Error("Class is required");
-  if (normalizedRows.length === 0) throw new Error("No valid student rows found");
+  if (!normalizedRows.length) throw new Error("No valid student rows found");
 
-  const uniqueRows = Array.from(
-    new Map(normalizedRows.map((row) => [row.email, row])).values()
-  );
-
+  const uniqueRows = Array.from(new Map(normalizedRows.map((row) => [row.email, row])).values());
   let imported = 0;
   let skipped = normalizedRows.length - uniqueRows.length;
-
   for (const row of uniqueRows) {
     const { data: student, error: studentError } = await supabaseServer
       .from("students")
-      .upsert(
-        { email: row.email, student_code: row.student_code, name: row.name },
-        { onConflict: "email" }
-      )
+      .upsert(row, { onConflict: "email" })
       .select("id")
       .single();
-
     if (studentError || !student) {
       skipped++;
       continue;
     }
-
     const { error: linkError } = await supabaseServer
       .from("class_students")
       .upsert(
         { class_id: classId, student_id: student.id },
         { onConflict: "class_id, student_id" }
       );
-
-    if (linkError) {
-      skipped++;
-      continue;
-    }
-
-    imported++;
+    if (linkError) skipped++;
+    else imported++;
   }
+  return { imported, skipped, total: normalizedRows.length };
+}
 
-  return {
-    imported,
-    skipped,
-    total: normalizedRows.length,
-  };
+export async function removeClassStudentAction(classId: string, classStudentId: string) {
+  await requireAdmin();
+  if (!classId || !classStudentId) throw new Error("Class and student membership are required");
+
+  const { data, error } = await supabaseServer
+    .from("class_students")
+    .delete()
+    .eq("id", classStudentId)
+    .eq("class_id", classId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Student is no longer enrolled in this class");
+
+  return { success: true };
+}
+
+export async function createTermAction(
+  name: string,
+  startsOn: string | null,
+  endsOn: string | null
+) {
+  await requireAdmin();
+  const { data, error } = await supabaseServer
+    .from("terms")
+    .insert({ name: name.trim(), starts_on: startsOn, ends_on: endsOn })
+    .select("id, name, starts_on, ends_on")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 export async function updateTermAction(
@@ -397,98 +415,49 @@ export async function updateTermAction(
   endsOn: string | null
 ) {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
     .from("terms")
-    .update({
-      name: name.trim(),
-      starts_on: startsOn,
-      ends_on: endsOn,
-    })
+    .update({ name: name.trim(), starts_on: startsOn, ends_on: endsOn })
     .eq("id", termId)
     .select()
     .single();
-
   if (error) throw new Error(error.message);
   return data;
 }
 
 export async function deleteTermAction(termId: string) {
   await requireAdmin();
-
-  // 1. Lấy danh sách các lớp thuộc term
-  const { data: classes, error: selectClassesError } = await supabaseServer
-    .from("classes")
-    .select("id")
-    .eq("term_id", termId);
-
-  if (selectClassesError) throw new Error(selectClassesError.message);
-
-  const classIds = (classes || []).map((c) => c.id);
-
-  if (classIds.length > 0) {
-    // 2. Xóa các lớp này (sẽ tự động cascade delete class_students, class_labs, class_lab_submissions)
-    const { error: deleteClassesError } = await supabaseServer
-      .from("classes")
-      .delete()
-      .in("id", classIds);
-
-    if (deleteClassesError) {
-      throw new Error(`Failed to delete associated classes: ${deleteClassesError.message}`);
-    }
-  }
-
-  // 3. Xóa term
-  const { error } = await supabaseServer
-    .from("terms")
-    .delete()
-    .eq("id", termId)
-    .select();
-
+  const { error } = await supabaseServer.from("terms").delete().eq("id", termId);
   if (error) throw new Error(error.message);
   return { success: true };
 }
 
-export async function updateClassAction(classId: string, name: string) {
+export async function createClassAction(termId: string, name: string) {
   await requireAdmin();
-
   const { data, error } = await supabaseServer
     .from("classes")
-    .update({
-      name: name.trim().toUpperCase(),
-    })
+    .insert({ term_id: termId, name: name.trim().toUpperCase() })
+    .select("id, term_id, name")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateClassAction(classId: string, name: string) {
+  await requireAdmin();
+  const { data, error } = await supabaseServer
+    .from("classes")
+    .update({ name: name.trim().toUpperCase() })
     .eq("id", classId)
     .select()
     .single();
-
   if (error) throw new Error(error.message);
   return data;
 }
 
 export async function deleteClassAction(classId: string) {
   await requireAdmin();
-
-  const { error } = await supabaseServer
-    .from("classes")
-    .delete()
-    .eq("id", classId)
-    .select();
-
+  const { error } = await supabaseServer.from("classes").delete().eq("id", classId);
   if (error) throw new Error(error.message);
   return { success: true };
 }
-
-export async function deleteClassLabAction(classLabId: string) {
-  await requireAdmin();
-
-  const { error } = await supabaseServer
-    .from("class_labs")
-    .delete()
-    .eq("id", classLabId)
-    .select();
-
-  if (error) throw new Error(error.message);
-  return { success: true };
-}
-
-

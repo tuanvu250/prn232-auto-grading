@@ -1,19 +1,13 @@
 import { queryOptions } from "@tanstack/react-query";
 
+import { getAdminDashboardStatsAction, getAllowedEmailsAction } from "@/lib/actions/admin";
 import {
-  getAdminDashboardStatsAction,
-  getAdminResubmissionsAction,
-  getAllowedEmailsAction,
-} from "@/lib/actions/admin";
-
-import {
-  getClassesForTermAction,
-  getAdminClassLabSubmissionsAction,
-  getAdminStudentResubmissionsAction,
+  getAdminSessionSubmissionsAction,
   getAdminStudentSubmissionsAction,
-  getClassLabsForClassAction,
-  getClassLabStudentResultsAction,
+  getClassesForTermAction,
   getClassStudentsForClassAction,
+  getGradingSessionsForClassAction,
+  getGradingSessionStudentResultsAction,
   getLabCatalogAction,
   getTermsAction,
 } from "@/lib/actions/erd-admin";
@@ -21,29 +15,19 @@ import {
 export const adminQueryKeys = {
   all: ["admin"] as const,
   terms: () => [...adminQueryKeys.all, "terms"] as const,
-  classes: (termId: string) =>
-    [...adminQueryKeys.all, "terms", termId, "classes"] as const,
+  classes: (termId: string) => [...adminQueryKeys.all, "terms", termId, "classes"] as const,
   classWorkspace: (termId: string, classId: string) =>
-    [...adminQueryKeys.classes(termId), classId, "workspace"] as const,
-  classLabStudents: (termId: string, classId: string, classLabId: string) =>
-    [...adminQueryKeys.classWorkspace(termId, classId), "labs", classLabId, "students"] as const,
-  studentDetails: (termId: string, classId: string, classLabId: string, classStudentId: string) =>
-    [...adminQueryKeys.classLabStudents(termId, classId, classLabId), classStudentId] as const,
-  classLabSubmissions: (termId: string, classId: string, classLabId: string) =>
-    [...adminQueryKeys.classLabStudents(termId, classId, classLabId), "all-submissions"] as const,
+    [...adminQueryKeys.classes(termId), classId, "sessions"] as const,
+  sessionStudents: (termId: string, classId: string, sessionId: string) =>
+    [...adminQueryKeys.classWorkspace(termId, classId), sessionId, "students"] as const,
+  studentDetails: (termId: string, classId: string, sessionId: string, studentId: string) =>
+    [...adminQueryKeys.sessionStudents(termId, classId, sessionId), studentId] as const,
+  sessionSubmissions: (termId: string, classId: string, sessionId: string) =>
+    [...adminQueryKeys.sessionStudents(termId, classId, sessionId), "all-submissions"] as const,
   dashboard: () => [...adminQueryKeys.all, "dashboard"] as const,
   dashboardOverview: () => [...adminQueryKeys.dashboard(), "overview"] as const,
-  dashboardResubmissions: (filters: AdminResubmissionFilters) =>
-    [...adminQueryKeys.dashboard(), "resubmissions", filters] as const,
   dashboardAccess: (filters: AdminAccessFilters) =>
     [...adminQueryKeys.dashboard(), "access", filters] as const,
-};
-
-export type AdminResubmissionFilters = {
-  status: string;
-  q?: string;
-  page: number;
-  pageSize: number;
 };
 
 export type AdminAccessFilters = {
@@ -54,10 +38,7 @@ export type AdminAccessFilters = {
 };
 
 export function adminTermsQueryOptions() {
-  return queryOptions({
-    queryKey: adminQueryKeys.terms(),
-    queryFn: getTermsAction,
-  });
+  return queryOptions({ queryKey: adminQueryKeys.terms(), queryFn: getTermsAction });
 }
 
 export function adminClassesQueryOptions(termId: string) {
@@ -68,8 +49,7 @@ export function adminClassesQueryOptions(termId: string) {
         getClassesForTermAction(termId),
         getTermsAction(),
       ]);
-      const term = terms.find((item) => item.id === termId);
-      return { classes, termName: term?.name ?? "Term" };
+      return { classes, termName: terms.find((item) => item.id === termId)?.name ?? "Term" };
     },
     enabled: Boolean(termId),
   });
@@ -79,17 +59,18 @@ export function adminClassWorkspaceQueryOptions(termId: string, classId: string)
   return queryOptions({
     queryKey: adminQueryKeys.classWorkspace(termId, classId),
     queryFn: async () => {
-      const [classLabs, students, catalog, classes, terms] = await Promise.all([
-        getClassLabsForClassAction(classId),
+      const [sessions, students, catalog, classes, terms] = await Promise.all([
+        getGradingSessionsForClassAction(classId),
         getClassStudentsForClassAction(classId),
         getLabCatalogAction(),
         getClassesForTermAction(termId),
         getTermsAction(),
       ]);
       return {
-        classLabs,
+        sessions,
         students,
         catalog,
+        classes,
         className: classes.find((item) => item.id === classId)?.name ?? "Class",
         termName: terms.find((item) => item.id === termId)?.name ?? "Term",
       };
@@ -98,62 +79,55 @@ export function adminClassWorkspaceQueryOptions(termId: string, classId: string)
   });
 }
 
-export function adminClassLabStudentsQueryOptions(
+export function adminSessionStudentsQueryOptions(
   termId: string,
   classId: string,
-  classLabId: string
+  sessionId: string
 ) {
   return queryOptions({
-    queryKey: adminQueryKeys.classLabStudents(termId, classId, classLabId),
+    queryKey: adminQueryKeys.sessionStudents(termId, classId, sessionId),
     queryFn: async () => {
-      const [results, labs, classes, terms] = await Promise.all([
-        getClassLabStudentResultsAction(classLabId),
-        getClassLabsForClassAction(classId),
+      const [results, sessions, classes, terms] = await Promise.all([
+        getGradingSessionStudentResultsAction(sessionId),
+        getGradingSessionsForClassAction(classId),
         getClassesForTermAction(termId),
         getTermsAction(),
       ]);
-      const lab = labs.find((item) => item.id === classLabId);
       return {
         results,
-        labCode: lab?.lab_code ?? "Lab",
-        labDriveRootUrl: lab?.drive_root_url ?? "",
+        session: sessions.find((item) => item.id === sessionId) ?? null,
         className: classes.find((item) => item.id === classId)?.name ?? "Class",
         termName: terms.find((item) => item.id === termId)?.name ?? "Term",
       };
     },
-    enabled: Boolean(termId && classId && classLabId),
+    enabled: Boolean(termId && classId && sessionId),
   });
 }
 
 export function adminStudentDetailsQueryOptions(
   termId: string,
   classId: string,
-  classLabId: string,
+  sessionId: string,
   classStudentId: string,
   hasAttempts: boolean
 ) {
   return queryOptions({
-    queryKey: adminQueryKeys.studentDetails(termId, classId, classLabId, classStudentId),
-    queryFn: async () => {
-      const [submissions, resubmissions] = await Promise.all([
-        hasAttempts
-          ? getAdminStudentSubmissionsAction(classStudentId, classLabId)
-          : Promise.resolve([]),
-        getAdminStudentResubmissionsAction(classStudentId, classLabId),
-      ]);
-      return { submissions, resubmissions };
-    },
+    queryKey: adminQueryKeys.studentDetails(termId, classId, sessionId, classStudentId),
+    queryFn: () =>
+      hasAttempts
+        ? getAdminStudentSubmissionsAction(classStudentId, sessionId)
+        : Promise.resolve([]),
   });
 }
 
-export function adminClassLabSubmissionsQueryOptions(
+export function adminSessionSubmissionsQueryOptions(
   termId: string,
   classId: string,
-  classLabId: string
+  sessionId: string
 ) {
   return queryOptions({
-    queryKey: adminQueryKeys.classLabSubmissions(termId, classId, classLabId),
-    queryFn: () => getAdminClassLabSubmissionsAction(classLabId),
+    queryKey: adminQueryKeys.sessionSubmissions(termId, classId, sessionId),
+    queryFn: () => getAdminSessionSubmissionsAction(sessionId),
   });
 }
 
@@ -161,13 +135,6 @@ export function adminDashboardOverviewQueryOptions() {
   return queryOptions({
     queryKey: adminQueryKeys.dashboardOverview(),
     queryFn: getAdminDashboardStatsAction,
-  });
-}
-
-export function adminDashboardResubmissionsQueryOptions(filters: AdminResubmissionFilters) {
-  return queryOptions({
-    queryKey: adminQueryKeys.dashboardResubmissions(filters),
-    queryFn: () => getAdminResubmissionsAction(filters),
   });
 }
 

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 
 import {
   Select,
@@ -29,23 +27,6 @@ export interface AllowedEmail {
   student_id: string;
   class_name: string;
   name?: string | null;
-}
-
-export interface ResubmissionRequest {
-  id: string;
-  student_id: string;
-  email: string;
-  name?: string | null;
-  class_name?: string | null;
-  lab_id: string;
-  drive_link: string;
-  note?: string | null;
-  admin_note?: string | null;
-  status: "pending" | "approved" | "rejected" | "completed";
-  created_at: string;
-  updated_at: string;
-  completed_at?: string | null;
-  completed_by?: string | null;
 }
 
 const emptyAccessForm = {
@@ -209,73 +190,6 @@ export function DeleteStudentAccessDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-interface RejectResubmissionDialogProps {
-  target: ResubmissionRequest | null;
-  note: string;
-  saving: boolean;
-  onNoteChange: (value: string) => void;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-}
-
-export function RejectResubmissionDialog({
-  target,
-  note,
-  saving,
-  onNoteChange,
-  onOpenChange,
-  onConfirm,
-}: RejectResubmissionDialogProps) {
-  const canReject = note.trim().length > 0 && !saving;
-
-  return (
-    <Dialog open={Boolean(target)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Reject Resubmission Request</DialogTitle>
-          <DialogDescription>
-            Add a note for {target?.student_id} so the student knows what to fix before submitting
-            again.
-          </DialogDescription>
-        </DialogHeader>
-        <Textarea
-          value={note}
-          onChange={(event) => onNoteChange(event.target.value)}
-          placeholder="Explain why this resubmission is rejected"
-          className="min-h-[120px]"
-          aria-label="Reject note"
-        />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={!canReject}>
-            {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Reject Request
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function StatusBadge({
-  status,
-}: {
-  status: "pending" | "approved" | "rejected" | "completed";
-}) {
-  const className =
-    status === "pending"
-      ? "border-none bg-amber-500 text-white hover:bg-amber-600"
-      : status === "approved"
-        ? "border-none bg-emerald-500 text-white hover:bg-emerald-600"
-        : status === "completed"
-          ? "border-none bg-sky-600 text-white hover:bg-sky-700"
-          : "border-none bg-red-600 text-white hover:bg-red-700";
-
-  return <Badge className={className}>{status}</Badge>;
 }
 
 export function EmptyTableRow({ colSpan, label }: { colSpan: number; label: string }) {

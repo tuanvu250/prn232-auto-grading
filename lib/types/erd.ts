@@ -17,12 +17,17 @@ export interface Lab {
   title: string | null;
 }
 
-export interface ClassLab {
+export type GradingSessionStatus = "open" | "closed";
+
+export interface GradingSession {
   id: string;
   class_id: string;
   lab_id: string;
+  name: string;
   deadline: string | null;
   drive_root_url: string | null;
+  status: GradingSessionStatus;
+  created_at: string;
   lab_code: string;
   lab_title: string | null;
 }
@@ -53,8 +58,6 @@ export interface SubmissionTestcase {
   max_score?: number;
   actual_response?: string | null;
   actual_status_code?: number | null;
-
-  // Fields from buildSyncDetails / JSON
   method?: string;
   httpMethod?: string;
   url?: string;
@@ -85,10 +88,10 @@ export interface SubmissionDetails {
   submissionStatus?: string;
 }
 
-export interface ClassLabSubmission {
+export interface SessionSubmission {
   id: string;
   class_student_id: string;
-  class_lab_id: string;
+  grading_session_id: string;
   attempt_no: number;
   item_type: SubmissionItemType;
   source_url: string | null;
@@ -97,44 +100,24 @@ export interface ClassLabSubmission {
   details: SubmissionDetails | null;
   submitted_at: string;
   graded_at: string | null;
-}
-
-export type ResubmissionRequestStatus = "pending" | "approved" | "rejected" | "completed";
-export type SubmissionRequestType = "late" | "resubmit";
-
-export interface ResubmissionRequestV2 {
-  id: string;
-  class_student_id: string;
-  class_lab_id: string;
-  submission_id: string | null;
-  created_submission_id: string | null;
-  request_type: SubmissionRequestType;
-  drive_link: string;
-  note: string | null;
-  admin_note: string | null;
-  status: ResubmissionRequestStatus;
   created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  completed_by: string | null;
 }
 
-// One row per (class_student_id, class_lab_id) as returned by the
-// admin_class_lab_student_results / student_class_lab_overview RPCs.
-export interface ClassLabStudentResult {
+export interface GradingSessionStudentResult {
   class_student_id: string;
   student_code: string;
   student_name: string | null;
   student_email: string;
   attempt_count: number;
-  resubmit_count: number;
   latest_attempt_no: number | null;
   latest_score: number | null;
   latest_status: SubmissionStatus | null;
 }
 
-export interface StudentClassLabOverview {
-  class_lab_id: string;
+export interface StudentGradingSessionOverview {
+  grading_session_id: string;
+  session_name: string;
+  session_status: GradingSessionStatus;
   lab_code: string;
   lab_title: string | null;
   deadline: string | null;

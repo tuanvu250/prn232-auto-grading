@@ -1,7 +1,5 @@
 "use client";
 
-/* eslint-disable react-hooks/set-state-in-effect */
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -186,10 +184,7 @@ export default function AdminTermsPage() {
         {loading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="h-28 border border-border bg-card p-5 rounded-lg space-y-3"
-              >
+              <div key={i} className="h-28 border border-border bg-card p-5 rounded-lg space-y-3">
                 <div className="flex items-center gap-2.5">
                   <Skeleton className="h-8 w-8 rounded" />
                   <div className="space-y-1.5 flex-1">
@@ -268,6 +263,7 @@ export default function AdminTermsPage() {
             </div>
 
             <TablePagination
+              fullBleed
               pagination={{
                 page: currentPage,
                 pageSize: pageSize,
@@ -406,16 +402,23 @@ export default function AdminTermsPage() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="bg-card border border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-bold">Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogTitle className="text-lg font-bold">
+              Are you absolutely sure?
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-sm">
-              This action will permanently delete the term <span className="font-semibold text-foreground">{deleteTermName}</span>.
+              This action will permanently delete the term{" "}
+              <span className="font-semibold text-foreground">{deleteTermName}</span>.
               <br />
               <br />
-              <span className="text-red-500 font-semibold">Warning:</span> All classes, enrolled students, lab assignments, submissions and grades in this term will also be permanently deleted. This action cannot be undone.
+              <span className="text-red-500 font-semibold">Warning:</span> All classes, enrolled
+              students, lab assignments, submissions and grades in this term will also be
+              permanently deleted. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-4 gap-2">
-            <AlertDialogCancel disabled={deleting} className="shadow-none border-border">Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting} className="shadow-none border-border">
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();

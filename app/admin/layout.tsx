@@ -1,20 +1,15 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
+import { usePathname, useRouter } from "next/navigation";
 import Cookies from "js-cookie";
 import { jwtDecode } from "jwt-decode";
 import { toast } from "sonner";
-import {
-  GraduationCap,
-  LogOut,
-  UploadCloud,
-  User as UserIcon,
-  Menu,
-  X,
-  LayoutDashboard,
-} from "lucide-react";
+import { GraduationCap, LogOut, User as UserIcon, Menu, X, LayoutDashboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ROLE_ADMIN } from "@/lib/types/roles";
@@ -23,12 +18,9 @@ import { removeAuthCookie, UserPayload } from "@/lib/utils/auth";
 function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [user, setUser] = useState<UserPayload | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  const currentView = searchParams.get("view") || "overview";
 
   useEffect(() => {
     const token = Cookies.get("authToken");
@@ -53,7 +45,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMobileMenuOpen(false);
-  }, [pathname, searchParams]);
+  }, [pathname]);
 
   useEffect(() => {
     setAvatarError(false);
@@ -65,10 +57,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     router.push("/");
   };
 
-  const isOverviewActive =
-    pathname === "/admin/dashboard" && currentView === "overview";
-  const isResubmissionsActive =
-    pathname === "/admin/dashboard" && currentView === "resubmissions";
+  const isOverviewActive = pathname === "/admin/dashboard";
   const isTermsActive = pathname.startsWith("/admin/terms");
 
   if (!user) {
@@ -95,7 +84,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       {/* Nav links */}
       <nav className="flex-1 space-y-1 p-3">
         <Link
-          href="/admin/dashboard?view=overview"
+          href="/admin/dashboard"
           className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
             isOverviewActive
               ? "bg-primary/10 text-primary"
@@ -105,7 +94,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
           <LayoutDashboard className="h-4 w-4" />
           Overview
         </Link>
-                <Link
+        <Link
           href="/admin/terms"
           className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
             isTermsActive
@@ -114,18 +103,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
           }`}
         >
           <GraduationCap className="h-4 w-4" />
-          Submissions
-        </Link>
-        <Link
-          href="/admin/dashboard?view=resubmissions"
-          className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-            isResubmissionsActive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }`}
-        >
-          <UploadCloud className="h-4 w-4" />
-          Resubmit Requests
+          Grading sessions
         </Link>
       </nav>
 
@@ -133,9 +111,11 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       <div className="border-t border-border p-4">
         <div className="flex items-center gap-3">
           {user.picture && !avatarError ? (
-            <img
+            <Image
               src={user.picture}
               alt={user.name}
+              width={36}
+              height={36}
               referrerPolicy="no-referrer"
               onError={() => setAvatarError(true)}
               className="h-9 w-9 rounded-full border border-border"
@@ -185,9 +165,11 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex items-center gap-2">
           {user.picture && !avatarError ? (
-            <img
+            <Image
               src={user.picture}
               alt={user.name}
+              width={28}
+              height={28}
               className="h-7 w-7 rounded-full border border-border"
             />
           ) : (
@@ -195,7 +177,13 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
               <UserIcon className="h-3.5 w-3.5" />
             </div>
           )}
-          <Button variant="ghost" size="icon" onClick={handleLogout} className="h-8 w-8" title="Sign out">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleLogout}
+            className="h-8 w-8"
+            title="Sign out"
+          >
             <LogOut className="h-4 w-4" />
           </Button>
         </div>
@@ -234,11 +222,13 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      }
+    >
       <AdminLayoutContent>{children}</AdminLayoutContent>
     </Suspense>
   );

@@ -9,7 +9,7 @@ function loadEnv() {
     console.error("Lỗi: Không tìm thấy file .env.local");
     process.exit(1);
   }
-  
+
   const content = fs.readFileSync(envPath, "utf8");
   content.split(/\r?\n/).forEach((line) => {
     const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
@@ -32,7 +32,9 @@ async function run() {
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error("Lỗi: Vui lòng điền đầy đủ NEXT_PUBLIC_SUPABASE_URL và SUPABASE_SERVICE_ROLE_KEY vào file .env.local");
+    console.error(
+      "Lỗi: Vui lòng điền đầy đủ NEXT_PUBLIC_SUPABASE_URL và SUPABASE_SERVICE_ROLE_KEY vào file .env.local"
+    );
     process.exit(1);
   }
 
@@ -48,46 +50,49 @@ async function run() {
 
   console.log("Đang đọc file CSV...");
   const csvContent = fs.readFileSync(csvPath, "utf8");
-  
+
   // Tách dòng
-  const lines = csvContent.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = csvContent
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   if (lines.length <= 1) {
     console.log("File CSV rỗng hoặc chỉ có dòng tiêu đề.");
     return;
   }
 
   // Lấy dòng tiêu đề
-  const headers = lines[0].split(",").map(h => h.trim());
+  const headers = lines[0].split(",").map((h) => h.trim());
   const emailIdx = headers.indexOf("email");
   const mssvIdx = headers.indexOf("MSSV");
   const classIdx = headers.indexOf("Class");
 
   if (emailIdx === -1 || mssvIdx === -1 || classIdx === -1) {
-    console.error("Lỗi: Định dạng file CSV không đúng (Thiếu cột email, MSSV hoặc Class trong dòng đầu tiên)");
+    console.error(
+      "Lỗi: Định dạng file CSV không đúng (Thiếu cột email, MSSV hoặc Class trong dòng đầu tiên)"
+    );
     process.exit(1);
   }
 
   const records = [];
-  
+
   // Duyệt qua từng dòng dữ liệu
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map(c => c.trim());
+    const cols = lines[i].split(",").map((c) => c.trim());
     // Bỏ qua dòng không đủ cột
     if (cols.length < Math.max(emailIdx, mssvIdx, classIdx) + 1) continue;
 
     records.push({
       email: cols[emailIdx].toLowerCase().trim(),
       student_id: cols[mssvIdx],
-      class_name: cols[classIdx]
+      class_name: cols[classIdx],
     });
   }
 
   console.log(`Đã đọc ${records.length} dòng dữ liệu sinh viên. Bắt đầu tải lên Supabase...`);
 
   // 3. Thực hiện Bulk Upsert lên Supabase (Ghi đè nếu trùng Email)
-  const { data, error } = await supabase
-    .from("allowed_emails")
-    .upsert(records, { onConflict: "email" });
+  const { error } = await supabase.from("allowed_emails").upsert(records, { onConflict: "email" });
 
   if (error) {
     console.error("Lỗi khi tải dữ liệu lên Supabase:", error.message);

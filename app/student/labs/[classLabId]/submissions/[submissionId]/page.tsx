@@ -1,14 +1,10 @@
 import { redirect } from "next/navigation";
 
-type PageProps = {
-  params: Promise<{
-    classLabId: string;
-    submissionId: string;
-  }>;
-};
-
-export default async function SubmissionDetailRedirectPage({ params }: PageProps) {
-  const resolvedParams = await params;
-  
-  redirect(`/student/labs/${resolvedParams.classLabId}?submissionId=${resolvedParams.submissionId}`);
+export default async function LegacySubmissionDetailPage({
+  params,
+}: {
+  params: Promise<{ classLabId: string; submissionId: string }>;
+}) {
+  const { classLabId, submissionId } = await params;
+  redirect(`/student/sessions/${classLabId}?submissionId=${submissionId}`);
 }
