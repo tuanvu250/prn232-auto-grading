@@ -1,13 +1,11 @@
 "use client";
 
-/* eslint-disable react-hooks/set-state-in-effect */
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, Users, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Plus, Users, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -31,11 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TablePagination } from "@/components/admin/TablePagination";
-import {
-  createClassAction,
-  updateClassAction,
-  deleteClassAction,
-} from "@/lib/actions/erd-admin";
+import { createClassAction, updateClassAction, deleteClassAction } from "@/lib/actions/erd-admin";
 import type { ClassRow } from "@/lib/types/erd";
 import { adminClassesQueryOptions, adminQueryKeys } from "@/lib/queries/admin";
 
@@ -184,13 +178,28 @@ export default function AdminClassesPage() {
             Browse and manage student classes enrolled in this semester.
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setDialogOpen(true)}
-          className="bg-primary hover:bg-primary-hover text-white shadow-none border-none self-start sm:self-center"
-        >
-          <Plus className="mr-1.5 h-4 w-4" /> New class
-        </Button>
+        <div className="flex flex-wrap gap-2 self-start sm:self-center">
+          {classes.length ? (
+            <Button size="sm" variant="outline" asChild>
+              <Link
+                href={`/admin/terms/${params.termId}/classes/${classes[0].id}/sessions?create=1`}
+              >
+                <CalendarPlus className="mr-1.5 h-4 w-4" /> Create session
+              </Link>
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" disabled>
+              <CalendarPlus className="mr-1.5 h-4 w-4" /> Create session
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() => setDialogOpen(true)}
+            className="border-none bg-primary text-white shadow-none hover:bg-primary-hover"
+          >
+            <Plus className="mr-1.5 h-4 w-4" /> New class
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col">
@@ -226,7 +235,7 @@ export default function AdminClassesPage() {
               {paginatedClasses.map((cls) => (
                 <Link
                   key={cls.id}
-                  href={`/admin/terms/${params.termId}/classes/${cls.id}/labs`}
+                  href={`/admin/terms/${params.termId}/classes/${cls.id}/sessions`}
                 >
                   <Card className="relative group h-full flex items-center gap-3 p-5 bg-card border border-border shadow-none hover:border-primary/50 transition-all rounded-lg">
                     {/* Hover Actions */}
@@ -257,7 +266,9 @@ export default function AdminClassesPage() {
                       <Users className="h-5 w-5" />
                     </div>
                     <div className="pr-16">
-                      <p className="text-sm font-bold text-foreground tracking-tight truncate">{cls.name}</p>
+                      <p className="text-sm font-bold text-foreground tracking-tight truncate">
+                        {cls.name}
+                      </p>
                       <p className="text-[10px] text-muted-foreground tracking-wider uppercase font-semibold">
                         Class Section
                       </p>
@@ -268,6 +279,7 @@ export default function AdminClassesPage() {
             </div>
 
             <TablePagination
+              fullBleed
               pagination={{
                 page: currentPage,
                 pageSize: pageSize,
@@ -362,16 +374,23 @@ export default function AdminClassesPage() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="bg-card border border-border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-bold">Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogTitle className="text-lg font-bold">
+              Are you absolutely sure?
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-sm">
-              This action will permanently delete the class <span className="font-semibold text-foreground">{deleteClassName}</span>.
+              This action will permanently delete the class{" "}
+              <span className="font-semibold text-foreground">{deleteClassName}</span>.
               <br />
               <br />
-              <span className="text-red-500 font-semibold">Warning:</span> All students, lab assignments, submissions and grading results belonging to this class will also be permanently deleted. This action cannot be undone.
+              <span className="text-red-500 font-semibold">Warning:</span> All students, lab
+              assignments, submissions and grading results belonging to this class will also be
+              permanently deleted. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-4 gap-2">
-            <AlertDialogCancel disabled={deleting} className="shadow-none border-border">Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting} className="shadow-none border-border">
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();

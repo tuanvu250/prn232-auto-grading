@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 export interface PaginationMeta {
   page: number;
@@ -18,6 +19,8 @@ export interface PaginationMeta {
 }
 
 interface TablePaginationProps {
+  className?: string;
+  fullBleed?: boolean;
   pagination: PaginationMeta;
   loading: boolean;
   onPageChange: (page: number) => void;
@@ -25,6 +28,8 @@ interface TablePaginationProps {
 }
 
 export function TablePagination({
+  className,
+  fullBleed = false,
   pagination,
   loading,
   onPageChange,
@@ -36,7 +41,13 @@ export function TablePagination({
   const canNext = pagination.page < pagination.totalPages && !loading;
 
   return (
-    <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      className={cn(
+        "mt-auto flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between",
+        fullBleed && "-mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8",
+        className
+      )}
+    >
       <div className="text-sm text-muted-foreground">
         Showing {start}-{end} of {pagination.total}
       </div>

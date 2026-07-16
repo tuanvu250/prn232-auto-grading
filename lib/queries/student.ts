@@ -1,40 +1,36 @@
 import { queryOptions } from "@tanstack/react-query";
 
 import {
-  getClassLabAttemptsAction,
-  getClassLabSubmissionAccessAction,
-  getResubmissionRequestForClassLabAction,
-  getStudentLabOverviewAction,
+  getGradingSessionAccessAction,
+  getSessionAttemptsAction,
+  getStudentSessionOverviewAction,
 } from "@/lib/actions/erd-student";
 
 export const studentQueryKeys = {
   all: ["student"] as const,
-  labOverview: () => [...studentQueryKeys.all, "lab-overview"] as const,
-  classLab: (classLabId: string) =>
-    [...studentQueryKeys.all, "class-lab", classLabId] as const,
+  sessionOverview: () => [...studentQueryKeys.all, "session-overview"] as const,
+  session: (sessionId: string) => [...studentQueryKeys.all, "session", sessionId] as const,
 };
 
-export function studentLabOverviewQueryOptions() {
+export function studentSessionOverviewQueryOptions() {
   return queryOptions({
-    queryKey: studentQueryKeys.labOverview(),
-    queryFn: getStudentLabOverviewAction,
+    queryKey: studentQueryKeys.sessionOverview(),
+    queryFn: getStudentSessionOverviewAction,
     staleTime: 60_000,
   });
 }
 
-export function studentClassLabQueryOptions(classLabId: string) {
+export function studentSessionQueryOptions(sessionId: string) {
   return queryOptions({
-    queryKey: studentQueryKeys.classLab(classLabId),
+    queryKey: studentQueryKeys.session(sessionId),
     queryFn: async () => {
-      const [attempts, request, labAccess] = await Promise.all([
-        getClassLabAttemptsAction(classLabId),
-        getResubmissionRequestForClassLabAction(classLabId),
-        getClassLabSubmissionAccessAction(classLabId),
+      const [attempts, sessionAccess] = await Promise.all([
+        getSessionAttemptsAction(sessionId),
+        getGradingSessionAccessAction(sessionId),
       ]);
-
-      return { attempts, request, labAccess };
+      return { attempts, sessionAccess };
     },
     staleTime: 30_000,
-    enabled: Boolean(classLabId),
+    enabled: Boolean(sessionId),
   });
 }
