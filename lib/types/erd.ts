@@ -114,6 +114,15 @@ export interface GradingSessionStudentResult {
   latest_status: SubmissionStatus | null;
 }
 
+export interface ClassGradeMatrixResult {
+  class_student_id: string;
+  grading_session_id: string;
+  attempt_count: number;
+  latest_attempt_no: number;
+  latest_score: number | null;
+  latest_status: SubmissionStatus;
+}
+
 export interface StudentGradingSessionOverview {
   grading_session_id: string;
   session_name: string;

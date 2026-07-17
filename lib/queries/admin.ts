@@ -4,6 +4,7 @@ import { getAdminDashboardStatsAction, getAllowedEmailsAction } from "@/lib/acti
 import {
   getAdminSessionSubmissionsAction,
   getAdminStudentSubmissionsAction,
+  getClassGradeMatrixResultsAction,
   getClassesForTermAction,
   getClassStudentsForClassAction,
   getGradingSessionsForClassAction,
@@ -59,9 +60,10 @@ export function adminClassWorkspaceQueryOptions(termId: string, classId: string)
   return queryOptions({
     queryKey: adminQueryKeys.classWorkspace(termId, classId),
     queryFn: async () => {
-      const [sessions, students, catalog, classes, terms] = await Promise.all([
+      const [sessions, students, gradeMatrix, catalog, classes, terms] = await Promise.all([
         getGradingSessionsForClassAction(classId),
         getClassStudentsForClassAction(classId),
+        getClassGradeMatrixResultsAction(classId),
         getLabCatalogAction(),
         getClassesForTermAction(termId),
         getTermsAction(),
@@ -69,6 +71,7 @@ export function adminClassWorkspaceQueryOptions(termId: string, classId: string)
       return {
         sessions,
         students,
+        gradeMatrix,
         catalog,
         classes,
         className: classes.find((item) => item.id === classId)?.name ?? "Class",

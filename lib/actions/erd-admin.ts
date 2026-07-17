@@ -4,6 +4,7 @@ import { getServerUser, userIsAdmin } from "@/lib/server/auth";
 import { supabaseServer } from "@/lib/server/supabase";
 import type {
   ClassRow,
+  ClassGradeMatrixResult,
   ClassStudentRosterRow,
   GradingSession,
   GradingSessionStatus,
@@ -266,6 +267,49 @@ export async function getGradingSessionStudentResultsAction(
       latest_status: (latest?.status as SubmissionStatus | undefined) ?? null,
     };
   });
+}
+
+export async function getClassGradeMatrixResultsAction(
+  classId: string
+): Promise<ClassGradeMatrixResult[]> {
+  await requireAdmin();
+
+  const { data: sessions, error: sessionsError } = await supabaseServer
+    .from("grading_sessions")
+    .select("id")
+    .eq("class_id", classId);
+  if (sessionsError) throw new Error(sessionsError.message);
+
+  const sessionIds = (sessions ?? []).map((session) => session.id);
+  if (!sessionIds.length) return [];
+
+  const { data: submissions, error: submissionsError } = await supabaseServer
+    .from("session_submissions")
+    .select("class_student_id, grading_session_id, attempt_no, score, status")
+    .in("grading_session_id", sessionIds)
+    .order("attempt_no", { ascending: false });
+  if (submissionsError) throw new Error(submissionsError.message);
+
+  const results = new Map<string, ClassGradeMatrixResult>();
+  for (const submission of submissions ?? []) {
+    const key = `${submission.class_student_id}:${submission.grading_session_id}`;
+    const current = results.get(key);
+    if (current) {
+      current.attempt_count += 1;
+      continue;
+    }
+
+    results.set(key, {
+      class_student_id: submission.class_student_id,
+      grading_session_id: submission.grading_session_id,
+      attempt_count: 1,
+      latest_attempt_no: submission.attempt_no,
+      latest_score: submission.score,
+      latest_status: submission.status as SubmissionStatus,
+    });
+  }
+
+  return Array.from(results.values());
 }
 
 export async function getAdminStudentSubmissionsAction(
