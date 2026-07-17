@@ -7,15 +7,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock,
   Code2,
+  FileDown,
+  FileSpreadsheet,
   FolderOpen,
+  LayoutGrid,
   MoreHorizontal,
   Plus,
+  RefreshCw,
   Search,
+  Table2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { GradeMatrix } from "@/components/admin/GradeMatrix";
+import { ImportStudentsExcelDialog } from "@/components/admin/ImportStudentsExcelDialog";
 import { StudentRosterSidebar } from "@/components/admin/StudentRosterSidebar";
 import { TablePagination } from "@/components/admin/TablePagination";
 import { Button } from "@/components/ui/button";
@@ -48,6 +55,7 @@ import {
 } from "@/lib/actions/erd-admin";
 import { adminClassWorkspaceQueryOptions, adminQueryKeys } from "@/lib/queries/admin";
 import type { GradingSession, GradingSessionStatus } from "@/lib/types/erd";
+import { cn } from "@/lib/utils";
 import { compareNaturalText } from "@/lib/utils/grading-session";
 
 function formatDeadline(deadline: string | null) {
@@ -65,12 +73,21 @@ function toLocalInputValue(value: string | null) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
+function excelSafeFilename(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "_");
+}
+
 type SessionDraft = {
   name: string;
   deadline: string;
   driveRootUrl: string;
   status: GradingSessionStatus;
 };
+
+type ViewMode = "cards" | "table";
 
 const CREATE_LAB_VALUE = "__create_new_lab__";
 
@@ -81,6 +98,7 @@ export default function AdminGradingSessionsPage() {
     adminClassWorkspaceQueryOptions(params.termId, params.classId)
   );
   const [query, setQuery] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [createOpen, setCreateOpen] = useState(false);
@@ -97,11 +115,24 @@ export default function AdminGradingSessionsPage() {
   const [editing, setEditing] = useState<GradingSession | null>(null);
   const [editDraft, setEditDraft] = useState<SessionDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GradingSession | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("create") !== "1") return;
-    const timer = window.setTimeout(() => setCreateOpen(true), 0);
-    return () => window.clearTimeout(timer);
+    const syncViewMode = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      setViewMode(searchParams.get("view") === "table" ? "table" : "cards");
+    };
+    const searchParams = new URLSearchParams(window.location.search);
+    const timer = window.setTimeout(() => {
+      if (searchParams.get("create") === "1") setCreateOpen(true);
+      syncViewMode();
+    }, 0);
+    window.addEventListener("popstate", syncViewMode);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", syncViewMode);
+    };
   }, []);
 
   const refresh = () =>
@@ -180,28 +211,121 @@ export default function AdminGradingSessionsPage() {
     onError: (mutationError) => toast.error(mutationError.message),
   });
 
+  const orderedSessions = useMemo(
+    () =>
+      [...(data?.sessions ?? [])].sort(
+        (left, right) =>
+          compareNaturalText(left.lab_code, right.lab_code) ||
+          compareNaturalText(left.name, right.name) ||
+          left.created_at.localeCompare(right.created_at)
+      ),
+    [data?.sessions]
+  );
+
   const sessions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     const visibleSessions = normalized
-      ? (data?.sessions ?? []).filter((session) =>
+      ? orderedSessions.filter((session) =>
           [session.name, session.lab_code, session.lab_title]
             .filter(Boolean)
             .some((value) => value!.toLowerCase().includes(normalized))
         )
-      : (data?.sessions ?? []);
+      : orderedSessions;
 
-    return [...visibleSessions].sort(
-      (left, right) =>
-        compareNaturalText(left.lab_code, right.lab_code) ||
-        compareNaturalText(left.name, right.name) ||
-        left.created_at.localeCompare(right.created_at)
+    return visibleSessions;
+  }, [orderedSessions, query]);
+
+  const matrixView = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return { students: data?.students ?? [], sessions: orderedSessions };
+    }
+
+    const matchingStudents = (data?.students ?? []).filter((student) =>
+      [student.student_code, student.student_name, student.student_email]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalized))
     );
-  }, [data?.sessions, query]);
+    const matchingSessions = orderedSessions.filter((session) =>
+      [session.name, session.lab_code, session.lab_title]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalized))
+    );
+
+    return {
+      students: matchingStudents.length
+        ? matchingStudents
+        : matchingSessions.length
+          ? (data?.students ?? [])
+          : [],
+      sessions: matchingSessions.length
+        ? matchingSessions
+        : matchingStudents.length
+          ? orderedSessions
+          : [],
+    };
+  }, [data?.students, orderedSessions, query]);
 
   const totalPages = Math.ceil(sessions.length / pageSize) || 1;
   const activePage = Math.min(currentPage, totalPages);
   const startIndex = (activePage - 1) * pageSize;
   const paginatedSessions = sessions.slice(startIndex, startIndex + pageSize);
+
+  const changeViewMode = (nextView: ViewMode) => {
+    setViewMode(nextView);
+    setCurrentPage(1);
+    const searchParams = new URLSearchParams(window.location.search);
+    if (nextView === "table") searchParams.set("view", "table");
+    else searchParams.delete("view");
+    const queryString = searchParams.toString();
+    window.history.pushState(null, "", queryString ? `?${queryString}` : window.location.pathname);
+  };
+
+  const exportGradeMatrix = async () => {
+    if (!matrixView.students.length || !matrixView.sessions.length) return;
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const resultByCell = new Map(
+        (data?.gradeMatrix ?? []).map((result) => [
+          `${result.class_student_id}:${result.grading_session_id}`,
+          result,
+        ])
+      );
+      const rows = matrixView.students.map((student) => {
+        const row: Record<string, string | number> = {
+          "Student ID": student.student_code,
+          "Full name": student.student_name ?? "",
+          Email: student.student_email,
+        };
+        for (const session of matrixView.sessions) {
+          const result = resultByCell.get(`${student.class_student_id}:${session.id}`);
+          row[`${session.lab_code} - ${session.name}`] = result?.latest_score ?? "";
+        }
+        return row;
+      });
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet["!cols"] = [
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 32 },
+        ...matrixView.sessions.map(() => ({ wch: 20 })),
+      ];
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Grade Matrix");
+      XLSX.writeFile(
+        workbook,
+        excelSafeFilename(
+          `${data?.termName ?? "Term"}_${data?.className ?? "Class"}_grade_matrix.xlsx`
+        )
+      );
+      toast.success(`Exported ${rows.length} students.`);
+    } catch (exportError) {
+      toast.error(exportError instanceof Error ? exportError.message : "Unable to export grades.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const openEditor = (session: GradingSession) => {
     setEditing(session);
@@ -224,8 +348,18 @@ export default function AdminGradingSessionsPage() {
 
   return (
     <div className="min-h-full lg:h-full lg:overflow-hidden">
-      <div className="grid min-h-full min-w-0 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <main className="order-last flex min-w-0 flex-col gap-6 px-4 py-6 sm:px-6 lg:order-first lg:h-full lg:overflow-y-auto lg:px-8 lg:pb-4 lg:pt-6">
+      <div
+        className={cn(
+          "grid min-h-full min-w-0 lg:h-full lg:min-h-0",
+          viewMode === "cards" && "lg:grid-cols-[minmax(0,1fr)_20rem]"
+        )}
+      >
+        <main
+          className={cn(
+            "order-last flex min-w-0 flex-col gap-6 px-4 py-6 sm:px-6 lg:order-first lg:h-full lg:px-8 lg:pb-4 lg:pt-6",
+            viewMode === "table" ? "lg:min-h-0 lg:overflow-hidden" : "lg:overflow-y-auto"
+          )}
+        >
           <AdminPageHeader
             breadcrumbs={[
               { label: "Terms", href: "/admin/terms" },
@@ -242,7 +376,7 @@ export default function AdminGradingSessionsPage() {
             }
           />
 
-          <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 border-t border-border pt-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="relative w-full sm:max-w-sm">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -251,15 +385,80 @@ export default function AdminGradingSessionsPage() {
                   setQuery(event.target.value);
                   setCurrentPage(1);
                 }}
-                placeholder="Search name or lab code"
+                placeholder={
+                  viewMode === "table"
+                    ? "Search student, session or lab code"
+                    : "Search name or lab code"
+                }
                 className="pl-9"
-                aria-label="Search grading sessions"
+                aria-label={
+                  viewMode === "table" ? "Search grade matrix" : "Search grading sessions"
+                }
               />
             </div>
-            <p className="text-sm text-muted-foreground">
-              {sessions.length} session{sessions.length === 1 ? "" : "s"} ·{" "}
-              {data?.students.length ?? 0} students
-            </p>
+            <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+              {viewMode === "table" ? (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+                    <FileSpreadsheet className="mr-2 h-4 w-4" /> Import Students
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportGradeMatrix}
+                    disabled={
+                      isPending ||
+                      isExporting ||
+                      matrixView.students.length === 0 ||
+                      matrixView.sessions.length === 0
+                    }
+                  >
+                    {isExporting ? (
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileDown className="mr-2 h-4 w-4" />
+                    )}
+                    {isExporting ? "Exporting…" : "Export Excel"}
+                  </Button>
+                </>
+              ) : null}
+              <div
+                className="inline-flex h-9 overflow-hidden rounded-md border border-border bg-background"
+                role="group"
+                aria-label="Grading session view"
+              >
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex min-w-24 items-center justify-center gap-2 px-3 text-sm font-medium outline-none transition-colors focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    viewMode === "cards"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  aria-pressed={viewMode === "cards"}
+                  onClick={() => changeViewMode("cards")}
+                >
+                  <LayoutGrid className="h-4 w-4" /> Cards
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex min-w-24 items-center justify-center gap-2 border-l border-border px-3 text-sm font-medium outline-none transition-colors focus-visible:relative focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    viewMode === "table"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  aria-pressed={viewMode === "table"}
+                  onClick={() => changeViewMode("table")}
+                >
+                  <Table2 className="h-4 w-4" /> Table
+                </button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {orderedSessions.length} session{orderedSessions.length === 1 ? "" : "s"} ·{" "}
+                {data?.students.length ?? 0} students
+              </p>
+            </div>
           </div>
 
           {error ? (
@@ -268,11 +467,14 @@ export default function AdminGradingSessionsPage() {
             </Card>
           ) : isPending ? (
             <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <Skeleton key={index} className="h-24 w-full" />
+              {Array.from({ length: viewMode === "table" ? 8 : 4 }).map((_, index) => (
+                <Skeleton
+                  key={index}
+                  className={viewMode === "table" ? "h-12 w-full" : "h-24 w-full"}
+                />
               ))}
             </div>
-          ) : sessions.length === 0 ? (
+          ) : orderedSessions.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center gap-3 border-y border-dashed border-border text-center">
               <CalendarClock className="h-8 w-8 text-muted-foreground" />
               <div>
@@ -284,6 +486,28 @@ export default function AdminGradingSessionsPage() {
               <Button variant="outline" onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" /> Create the first session
               </Button>
+            </div>
+          ) : viewMode === "table" ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
+              <GradeMatrix
+                termId={params.termId}
+                classId={params.classId}
+                sessions={matrixView.sessions}
+                students={matrixView.students}
+                results={data?.gradeMatrix ?? []}
+                emptyMessage={
+                  query.trim()
+                    ? "No students or grading sessions match this search."
+                    : "No students are enrolled in this class yet. Import a roster to begin."
+                }
+              />
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="flex min-h-64 flex-col items-center justify-center border-y border-dashed border-border text-center">
+              <p className="font-semibold">No grading sessions match this search</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Try a different session name or lab code.
+              </p>
             </div>
           ) : (
             <div className="flex flex-1 flex-col gap-6">
@@ -373,14 +597,24 @@ export default function AdminGradingSessionsPage() {
           )}
         </main>
 
-        <StudentRosterSidebar
-          classId={params.classId}
-          className={data?.className ?? "Class"}
-          students={data?.students ?? []}
-          loading={isPending}
-          onRosterImported={refresh}
-        />
+        {viewMode === "cards" ? (
+          <StudentRosterSidebar
+            classId={params.classId}
+            className={data?.className ?? "Class"}
+            students={data?.students ?? []}
+            loading={isPending}
+            onRosterImported={refresh}
+          />
+        ) : null}
       </div>
+
+      <ImportStudentsExcelDialog
+        classId={params.classId}
+        className={data?.className ?? "Class"}
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={refresh}
+      />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-2xl">
