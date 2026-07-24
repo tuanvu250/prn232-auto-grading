@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "hs-brainstorm": {
+      "source": "Unibean9/harness-skills",
+      "sourceType": "github",
+      "skillPath": "skills/hs-brainstorm/SKILL.md",
+      "computedHash": "a40084acc3330a552af3df51f8e49138cb8ad4755ac2e54a1b1b1fb127f2e20f"
+    },
+    "hs-build": {
+      "source": "Unibean9/harness-skills",
+      "sourceType": "github",
+      "skillPath": "skills/hs-build/SKILL.md",
+      "computedHash": "e4108722c362883fdde7cf3acc49fa178bba6711985cdccb8c1d5850492bcb6c"
+    },
+    "hs-plan": {
+      "source": "Unibean9/harness-skills",
+      "sourceType": "github",
+      "skillPath": "skills/hs-plan/SKILL.md",
+      "computedHash": "a8eb13a2e70f3578d0c28d8272230b1bd04da23d9858de9c3f12955dacda83af"
+    },
+    "hs-review": {
+      "source": "Unibean9/harness-skills",
+      "sourceType": "github",
+      "skillPath": "skills/hs-review/SKILL.md",
+      "computedHash": "7acd937d8ad96143aada32db41ccbee19cf473c5c1d618967455ae5999542919"
+    },
+    "hs-ship": {
+      "source": "Unibean9/harness-skills",
+      "sourceType": "github",
+      "skillPath": "skills/hs-ship/SKILL.md",
+      "computedHash": "dbe772646a0ce2575cac3b4d92c31b6ebb7e6ebe34df0642e3bee2fea7e5e927"
+    },
+    "hs-verify": {
+      "source": "Unibean9/harness-skills",
+      "sourceType": "github",
+      "skillPath": "skills/hs-verify/SKILL.md",
+      "computedHash": "79026e8f70936525326bac4fd6885451980db19aaed6343ff0a447089337d221"
+    }
+  }
+}
