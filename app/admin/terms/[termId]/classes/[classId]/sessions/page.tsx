@@ -53,10 +53,11 @@ import {
   deleteGradingSessionAction,
   updateGradingSessionAction,
 } from "@/lib/actions/erd-admin";
-import { adminClassWorkspaceQueryOptions, adminQueryKeys } from "@/lib/queries/admin";
+import { adminClassWorkspaceQueryOptions } from "@/lib/queries/admin";
+import { invalidateAdminClassCaches, invalidateAdminTermCaches } from "@/lib/queries/invalidation";
 import type { GradingSession, GradingSessionStatus } from "@/lib/types/erd";
 import { cn } from "@/lib/utils";
-import { compareNaturalText } from "@/lib/utils/grading-session";
+import { compareNaturalText, selectLatestMatrixLabSessions } from "@/lib/utils/grading-session";
 
 function formatDeadline(deadline: string | null) {
   if (!deadline) return "No deadline";
@@ -135,10 +136,10 @@ export default function AdminGradingSessionsPage() {
     };
   }, []);
 
-  const refresh = () =>
-    queryClient.invalidateQueries({
-      queryKey: adminQueryKeys.classWorkspace(params.termId, params.classId),
-    });
+  const refreshClassWorkspace = () =>
+    invalidateAdminClassCaches(queryClient, params.termId, params.classId);
+
+  const refreshTermWorkspace = () => invalidateAdminTermCaches(queryClient, params.termId);
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -156,7 +157,7 @@ export default function AdminGradingSessionsPage() {
       return result;
     },
     onSuccess: async (result) => {
-      await refresh();
+      await refreshTermWorkspace();
       toast.success(`Created ${result.created} grading session${result.created === 1 ? "" : "s"}.`);
       setCreateOpen(false);
       setSelectedLabId("");
@@ -174,7 +175,7 @@ export default function AdminGradingSessionsPage() {
   const createLabMutation = useMutation({
     mutationFn: () => createLabAction(newLabCode, newLabTitle.trim() || null),
     onSuccess: async (lab) => {
-      await refresh();
+      await refreshTermWorkspace();
       setSelectedLabId(lab.id);
       setCreatingLab(false);
       setNewLabCode("");
@@ -193,7 +194,7 @@ export default function AdminGradingSessionsPage() {
       });
     },
     onSuccess: async () => {
-      await refresh();
+      await refreshClassWorkspace();
       toast.success("Session updated.");
       setEditing(null);
       setEditDraft(null);
@@ -207,7 +208,7 @@ export default function AdminGradingSessionsPage() {
       return deleteGradingSessionAction(deleteTarget.id);
     },
     onSuccess: async () => {
-      await refresh();
+      await refreshClassWorkspace();
       toast.success("Session deleted.");
       setDeleteTarget(null);
     },
@@ -240,8 +241,9 @@ export default function AdminGradingSessionsPage() {
 
   const matrixView = useMemo(() => {
     const normalized = query.trim().toLowerCase();
+    const latestMatrixSessions = selectLatestMatrixLabSessions(orderedSessions);
     if (!normalized) {
-      return { students: data?.students ?? [], sessions: orderedSessions };
+      return { students: data?.students ?? [], sessions: latestMatrixSessions };
     }
 
     const matchingStudents = (data?.students ?? []).filter((student) =>
@@ -249,7 +251,7 @@ export default function AdminGradingSessionsPage() {
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalized))
     );
-    const matchingSessions = orderedSessions.filter((session) =>
+    const matchingSessions = latestMatrixSessions.filter((session) =>
       [session.name, session.lab_code, session.lab_title]
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalized))
@@ -264,7 +266,7 @@ export default function AdminGradingSessionsPage() {
       sessions: matchingSessions.length
         ? matchingSessions
         : matchingStudents.length
-          ? orderedSessions
+          ? latestMatrixSessions
           : [],
     };
   }, [data?.students, orderedSessions, query]);
@@ -606,7 +608,7 @@ export default function AdminGradingSessionsPage() {
             className={data?.className ?? "Class"}
             students={data?.students ?? []}
             loading={isPending}
-            onRosterImported={refresh}
+            onRosterImported={refreshClassWorkspace}
           />
         ) : null}
       </div>
@@ -616,7 +618,7 @@ export default function AdminGradingSessionsPage() {
         className={data?.className ?? "Class"}
         open={importOpen}
         onOpenChange={setImportOpen}
-        onImported={refresh}
+        onImported={refreshClassWorkspace}
       />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
