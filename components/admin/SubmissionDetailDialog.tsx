@@ -47,8 +47,8 @@ type SubmissionDetailDialogProps = {
   attempts: SessionSubmission[];
   loading: boolean;
   onClose: () => void;
-  onEdit: (attempt: SessionSubmission) => void;
-  onDelete: (attempt: SessionSubmission) => void;
+  onEdit?: (attempt: SessionSubmission) => void;
+  onDelete?: (attempt: SessionSubmission) => void;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -215,24 +215,28 @@ export function SubmissionDetailDialog({
                                     </a>
                                   </Button>
                                 ) : null}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                  onClick={() => onEdit(attempt)}
-                                  aria-label="Edit attempt"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-destructive"
-                                  onClick={() => onDelete(attempt)}
-                                  aria-label="Delete attempt"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
+                                {onEdit ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    onClick={() => onEdit(attempt)}
+                                    aria-label="Edit attempt"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
+                                {onDelete ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-destructive"
+                                    onClick={() => onDelete(attempt)}
+                                    aria-label="Delete attempt"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -322,9 +326,7 @@ export function SubmissionDetailDialog({
                                   test.effectiveScore ??
                                   test.awardedScore ??
                                   test.score;
-                                const expandable = Boolean(
-                                  errorMessage || response || test.overrideReason
-                                );
+                                const expandable = Boolean(errorMessage || response);
                                 const expanded = Boolean(expandedTests[index]);
                                 return (
                                   <Fragment key={`${endpoint}-${index}`}>
@@ -410,12 +412,6 @@ export function SubmissionDetailDialog({
                                                 <pre className="whitespace-pre-wrap font-mono text-[11px]">
                                                   {errorMessage}
                                                 </pre>
-                                              </div>
-                                            ) : null}
-                                            {test.overrideReason ? (
-                                              <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800">
-                                                <strong>Override Reason:</strong>{" "}
-                                                {test.overrideReason}
                                               </div>
                                             ) : null}
                                             {response !== null && response !== undefined ? (

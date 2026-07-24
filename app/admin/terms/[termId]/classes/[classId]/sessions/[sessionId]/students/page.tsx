@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  BadgeCheck,
   CheckCircle2,
   ExternalLink,
   Eye,
@@ -51,6 +52,7 @@ import {
 } from "@/components/ui/table";
 import {
   deleteStudentSubmissionAction,
+  setStudentSubmissionScoreEightAction,
   updateStudentSubmissionAction,
 } from "@/lib/actions/erd-admin";
 import {
@@ -109,6 +111,7 @@ export default function AdminSessionStudentsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingMissing, setIsExportingMissing] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<GradingSessionStudentResult | null>(null);
   const [attempts, setAttempts] = useState<SessionSubmission[]>([]);
   const [loadingAttempts, setLoadingAttempts] = useState(false);
@@ -116,6 +119,9 @@ export default function AdminSessionStudentsPage() {
   const [score, setScore] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<SessionSubmission | null>(null);
+  const [scoreEightTarget, setScoreEightTarget] = useState<GradingSessionStudentResult | null>(
+    null
+  );
   const openedStudentRef = useRef<string | null>(null);
 
   const rows = useMemo(() => {
@@ -251,6 +257,45 @@ export default function AdminSessionStudentsPage() {
     }
   };
 
+  const exportMissingSubmissions = async () => {
+    const missingRows = results.filter((row) => row.latest_status === null);
+    if (!missingRows.length) return;
+
+    setIsExportingMissing(true);
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(
+          missingRows.map((row) => ({
+            "Student Code": row.student_code,
+            "Full Name": row.student_name ?? "",
+            Email: row.student_email,
+            Class: data?.className ?? "",
+            Lab: data?.session?.lab_code ?? "",
+            Session: data?.session?.name ?? "",
+            Status: "not_submitted",
+          }))
+        ),
+        "Missing Submissions"
+      );
+      XLSX.writeFile(
+        workbook,
+        excelSafeFilename(
+          `${data?.termName ?? "Term"}_${data?.className ?? "Class"}_${data?.session?.lab_code ?? "Lab"}_missing_submissions.xlsx`
+        )
+      );
+      toast.success(`Exported ${missingRows.length} missing submissions.`);
+    } catch (exportError) {
+      toast.error(
+        exportError instanceof Error ? exportError.message : "Unable to export missing students."
+      );
+    } finally {
+      setIsExportingMissing(false);
+    }
+  };
+
   const updateMutation = useMutation({
     mutationFn: () => {
       if (!editing) throw new Error("Attempt is not selected");
@@ -285,11 +330,27 @@ export default function AdminSessionStudentsPage() {
     onError: (mutationError) => toast.error(mutationError.message),
   });
 
+  const setScoreEightMutation = useMutation({
+    mutationFn: (student: GradingSessionStudentResult) =>
+      setStudentSubmissionScoreEightAction(student.class_student_id, params.sessionId),
+    onSuccess: async (_, student) => {
+      await invalidateAdminClassCaches(queryClient, params.termId, params.classId);
+      if (selectedStudent?.class_student_id === student.class_student_id) {
+        await loadAttempts(student);
+      }
+      toast.success(`Set ${student.student_code} to 8.00.`);
+      setScoreEightTarget(null);
+    },
+    onError: (mutationError) => toast.error(mutationError.message),
+  });
+
   const openEditor = (attempt: SessionSubmission) => {
     setEditing(attempt);
     setScore(attempt.score?.toString() ?? "");
     setSourceUrl(attempt.source_url ?? "");
   };
+
+  const settingScoreStudentId = setScoreEightMutation.variables?.class_student_id ?? null;
 
   return (
     <div className="flex min-h-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:px-8 lg:pb-4 lg:pt-6">
@@ -329,6 +390,19 @@ export default function AdminSessionStudentsPage() {
                 <FileDown className="mr-2 h-4 w-4" />
               )}
               Export Excel
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={exportMissingSubmissions}
+              disabled={isPending || isExportingMissing || summary.notSubmitted === 0}
+            >
+              {isExportingMissing ? (
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="mr-2 h-4 w-4" />
+              )}
+              Export Missing
             </Button>
             <Button size="sm" variant="outline" onClick={refreshResults} disabled={isPending}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
@@ -449,34 +523,60 @@ export default function AdminSessionStudentsPage() {
                 </TableHeader>
                 <TableBody>
                   {paginatedRows.length ? (
-                    paginatedRows.map((row) => (
-                      <TableRow key={row.class_student_id}>
-                        <TableCell className="pl-6 font-mono text-sm font-bold">
-                          {row.student_code}
-                        </TableCell>
-                        <TableCell className="font-medium">{row.student_name || "—"}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {row.student_email}
-                        </TableCell>
-                        <TableCell className="text-center font-mono">{row.attempt_count}</TableCell>
-                        <TableCell className="text-right font-mono font-bold">
-                          {scoreLabel(row.latest_score)}
-                        </TableCell>
-                        <TableCell>{statusBadge(row.latest_status)}</TableCell>
-                        <TableCell className="pr-6 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => loadAttempts(row)}
-                            title="View details"
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span className="sr-only">View details</span>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    paginatedRows.map((row) => {
+                      const canSetScoreEight = row.latest_score !== null && row.latest_score < 8;
+
+                      return (
+                        <TableRow key={row.class_student_id}>
+                          <TableCell className="pl-6 font-mono text-sm font-bold">
+                            {row.student_code}
+                          </TableCell>
+                          <TableCell className="font-medium">{row.student_name || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">
+                            {row.student_email}
+                          </TableCell>
+                          <TableCell className="text-center font-mono">
+                            {row.attempt_count}
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-bold">
+                            {scoreLabel(row.latest_score)}
+                          </TableCell>
+                          <TableCell>{statusBadge(row.latest_status)}</TableCell>
+                          <TableCell className="pr-6 text-right">
+                            <div className="flex justify-end gap-1">
+                              {canSetScoreEight ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => setScoreEightTarget(row)}
+                                  disabled={setScoreEightMutation.isPending}
+                                  title="Set score 8"
+                                >
+                                  {setScoreEightMutation.isPending &&
+                                  settingScoreStudentId === row.class_student_id ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <BadgeCheck className="h-4 w-4" />
+                                  )}
+                                  <span className="sr-only">Set score 8</span>
+                                </Button>
+                              ) : null}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => loadAttempts(row)}
+                                title="View details"
+                              >
+                                <Eye className="h-4 w-4" />
+                                <span className="sr-only">View details</span>
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   ) : (
                     <TableRow>
                       <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
@@ -575,6 +675,44 @@ export default function AdminSessionStudentsPage() {
               disabled={deleteMutation.isPending}
             >
               {deleteMutation.isPending ? "Deleting…" : "Delete attempt"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(scoreEightTarget)}
+        onOpenChange={(open) => {
+          if (!open && !setScoreEightMutation.isPending) setScoreEightTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set score to 8?</DialogTitle>
+            <DialogDescription>
+              This will update the latest submission for{" "}
+              <strong className="text-foreground">{scoreEightTarget?.student_code}</strong> in{" "}
+              <strong className="text-foreground">
+                {data?.session?.lab_code ?? "Lab"} - {data?.session?.name ?? "Session"}
+              </strong>{" "}
+              to 8.00 and replace its result details with the set-8 template.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setScoreEightTarget(null)}
+              disabled={setScoreEightMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (scoreEightTarget) setScoreEightMutation.mutate(scoreEightTarget);
+              }}
+              disabled={setScoreEightMutation.isPending || !scoreEightTarget}
+            >
+              {setScoreEightMutation.isPending ? "Setting…" : "Set score 8"}
             </Button>
           </DialogFooter>
         </DialogContent>
