@@ -86,6 +86,10 @@ export interface SubmissionDetails {
   studentCode?: string;
   submissionId?: string;
   submissionStatus?: string;
+  manualOverride?: boolean;
+  manualOverrideScore?: number;
+  overrideReason?: string | null;
+  overriddenAt?: string;
 }
 
 export interface SessionSubmission {

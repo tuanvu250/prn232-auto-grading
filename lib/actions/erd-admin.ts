@@ -1,5 +1,8 @@
 "use server";
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { getServerUser, userIsAdmin } from "@/lib/server/auth";
 import { supabaseServer } from "@/lib/server/supabase";
 import type {
@@ -22,6 +25,115 @@ import {
 async function requireAdmin() {
   const user = await getServerUser();
   if (!user || !userIsAdmin(user)) throw new Error("Forbidden: admin access required");
+}
+
+const ADMIN_SCORE_EIGHT = 8;
+const ADMIN_SCORE_EIGHT_REASON = "Admin manual override to 8/10";
+
+const SCORE_EIGHT_EXAMPLE_FILES = {
+  LAB1: "lab-custom-result-set-8-lab-1.md",
+  LAB2: "lab-custom-result-set-8-lab-2.md",
+  LAB3: "lab-custom-result-set-8-lab-3.md",
+} as const;
+
+function hasResultEntries(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function scoreEightManualResult(overriddenAt: string) {
+  return {
+    name: "Manual score override",
+    passed: true,
+    score: ADMIN_SCORE_EIGHT,
+    max_score: 10,
+    awardedScore: ADMIN_SCORE_EIGHT,
+    effectiveScore: ADMIN_SCORE_EIGHT,
+    manualOverrideScore: ADMIN_SCORE_EIGHT,
+    overrideReason: ADMIN_SCORE_EIGHT_REASON,
+    overriddenAt,
+  };
+}
+
+function normalizeExampleLabCode(labCode: string | null | undefined) {
+  const normalized = (labCode ?? "").replace(/[\s_-]+/g, "").toUpperCase();
+  if (normalized === "LAB1" || normalized === "LAB2" || normalized === "LAB3") return normalized;
+  return null;
+}
+
+function extractExampleDetails(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const maybeData = (payload as { data?: unknown }).data;
+  if (!maybeData || typeof maybeData !== "object" || Array.isArray(maybeData)) return null;
+  return maybeData as Record<string, unknown>;
+}
+
+async function readScoreEightExampleDetails(labCode: string | null | undefined) {
+  const normalizedLabCode = normalizeExampleLabCode(labCode);
+  if (!normalizedLabCode) return null;
+
+  const fileName = SCORE_EIGHT_EXAMPLE_FILES[normalizedLabCode];
+  const filePath = path.join(process.cwd(), "docs", "examples", fileName);
+  try {
+    return extractExampleDetails(JSON.parse(await readFile(filePath, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+function withScoreEightMetadata(details: Record<string, unknown>, overriddenAt: string) {
+  const results = hasResultEntries(details.results) ? details.results : undefined;
+
+  return {
+    ...details,
+    totalScore: ADMIN_SCORE_EIGHT,
+    submissionStatus: "Done",
+    jobStatus: "Done",
+    manualOverride: true,
+    manualOverrideScore: ADMIN_SCORE_EIGHT,
+    overrideReason: ADMIN_SCORE_EIGHT_REASON,
+    overriddenAt,
+    ...(results ? { results, tests: results } : {}),
+  };
+}
+
+async function mergeScoreEightDetails(
+  details: unknown,
+  overriddenAt: string,
+  labCode: string | null | undefined
+) {
+  const base =
+    details && typeof details === "object" && !Array.isArray(details)
+      ? (details as Record<string, unknown>)
+      : {};
+  const exampleDetails = await readScoreEightExampleDetails(labCode);
+
+  if (exampleDetails && hasResultEntries(exampleDetails.results)) {
+    return withScoreEightMetadata(
+      {
+        ...base,
+        results: exampleDetails.results,
+      },
+      overriddenAt
+    );
+  }
+
+  const merged = {
+    ...base,
+    totalScore: ADMIN_SCORE_EIGHT,
+    manualOverride: true,
+    manualOverrideScore: ADMIN_SCORE_EIGHT,
+    overrideReason: ADMIN_SCORE_EIGHT_REASON,
+    overriddenAt,
+  };
+
+  if (hasResultEntries(base.results) || hasResultEntries(base.tests)) return merged;
+
+  const manualResult = scoreEightManualResult(overriddenAt);
+  return {
+    ...merged,
+    results: [manualResult],
+    tests: [manualResult],
+  };
 }
 
 export async function getTermsAction(): Promise<Term[]> {
@@ -403,6 +515,76 @@ export async function updateStudentSubmissionAction(
     .single();
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function setStudentSubmissionScoreEightAction(
+  classStudentId: string,
+  sessionId: string
+): Promise<SessionSubmission> {
+  await requireAdmin();
+  if (!classStudentId) throw new Error("Student is required");
+  if (!sessionId) throw new Error("Session is required");
+
+  const overriddenAt = new Date().toISOString();
+  const [latestResult, sessionResult] = await Promise.all([
+    supabaseServer
+      .from("session_submissions")
+      .select("id, details")
+      .eq("class_student_id", classStudentId)
+      .eq("grading_session_id", sessionId)
+      .order("attempt_no", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabaseServer.from("grading_sessions").select("labs(code)").eq("id", sessionId).single(),
+  ]);
+
+  const { data: latestSubmission, error: latestError } = latestResult;
+  if (latestError) throw new Error(latestError.message);
+
+  if (sessionResult.error) throw new Error(sessionResult.error.message);
+
+  type SessionLabCodeRow = { labs: { code: string } | null };
+  const session = sessionResult.data as unknown as SessionLabCodeRow;
+  const details = await mergeScoreEightDetails(
+    latestSubmission?.details,
+    overriddenAt,
+    session.labs?.code
+  );
+
+  if (latestSubmission) {
+    const { data, error } = await supabaseServer
+      .from("session_submissions")
+      .update({
+        score: ADMIN_SCORE_EIGHT,
+        status: "passed",
+        details,
+        graded_at: overriddenAt,
+      })
+      .eq("id", latestSubmission.id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data as SessionSubmission;
+  }
+
+  const { data, error } = await supabaseServer.rpc("create_session_submission", {
+    p_class_student_id: classStudentId,
+    p_grading_session_id: sessionId,
+    p_source_url: null,
+    p_score: ADMIN_SCORE_EIGHT,
+    p_details: details,
+  });
+  if (error) {
+    const message =
+      error.message === "grading_session_not_open_or_student_not_enrolled"
+        ? "Cannot create a manual score because the session is not open or the student is not enrolled."
+        : error.message === "grading_session_deadline_passed"
+          ? "Cannot create a new manual score after the session deadline. Edit an existing attempt instead."
+          : error.message;
+    throw new Error(message);
+  }
+
+  return data as SessionSubmission;
 }
 
 export async function deleteStudentSubmissionAction(submissionId: string) {

@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { GradeMatrix } from "@/components/admin/GradeMatrix";
 import { ImportStudentsExcelDialog } from "@/components/admin/ImportStudentsExcelDialog";
+import { SubmissionDetailDialog } from "@/components/admin/SubmissionDetailDialog";
 import { StudentRosterSidebar } from "@/components/admin/StudentRosterSidebar";
 import { TablePagination } from "@/components/admin/TablePagination";
 import { Button } from "@/components/ui/button";
@@ -51,11 +52,22 @@ import {
   createLabAction,
   createGradingSessionsAction,
   deleteGradingSessionAction,
+  setStudentSubmissionScoreEightAction,
   updateGradingSessionAction,
 } from "@/lib/actions/erd-admin";
-import { adminClassWorkspaceQueryOptions } from "@/lib/queries/admin";
+import {
+  adminClassWorkspaceQueryOptions,
+  adminStudentDetailsQueryOptions,
+} from "@/lib/queries/admin";
 import { invalidateAdminClassCaches, invalidateAdminTermCaches } from "@/lib/queries/invalidation";
-import type { GradingSession, GradingSessionStatus } from "@/lib/types/erd";
+import type {
+  ClassGradeMatrixResult,
+  ClassStudentRosterRow,
+  GradingSession,
+  GradingSessionStatus,
+  GradingSessionStudentResult,
+  SessionSubmission,
+} from "@/lib/types/erd";
 import { cn } from "@/lib/utils";
 import { compareNaturalText, selectLatestMatrixLabSessions } from "@/lib/utils/grading-session";
 
@@ -81,6 +93,10 @@ function excelSafeFilename(value: string) {
     .replace(/\s+/g, "_");
 }
 
+function displayScore(score: number | null | undefined) {
+  return score === null || score === undefined ? "" : Math.min(score, 10);
+}
+
 type SessionDraft = {
   name: string;
   deadline: string;
@@ -91,6 +107,15 @@ type SessionDraft = {
 type ViewMode = "cards" | "table";
 
 const CREATE_LAB_VALUE = "__create_new_lab__";
+
+type MatrixScoreEightTarget = {
+  student: ClassStudentRosterRow;
+  session: GradingSession;
+};
+
+type MatrixDetailTarget = MatrixScoreEightTarget & {
+  result: ClassGradeMatrixResult;
+};
 
 export default function AdminGradingSessionsPage() {
   const params = useParams<{ termId: string; classId: string }>();
@@ -116,8 +141,13 @@ export default function AdminGradingSessionsPage() {
   const [editing, setEditing] = useState<GradingSession | null>(null);
   const [editDraft, setEditDraft] = useState<SessionDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GradingSession | null>(null);
+  const [scoreEightTarget, setScoreEightTarget] = useState<MatrixScoreEightTarget | null>(null);
+  const [detailStudent, setDetailStudent] = useState<GradingSessionStudentResult | null>(null);
+  const [detailAttempts, setDetailAttempts] = useState<SessionSubmission[]>([]);
+  const [loadingDetailAttempts, setLoadingDetailAttempts] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingMissing, setIsExportingMissing] = useState(false);
 
   useEffect(() => {
     const syncViewMode = () => {
@@ -215,6 +245,17 @@ export default function AdminGradingSessionsPage() {
     onError: (mutationError) => toast.error(mutationError.message),
   });
 
+  const setScoreEightMutation = useMutation({
+    mutationFn: ({ student, session }: MatrixScoreEightTarget) =>
+      setStudentSubmissionScoreEightAction(student.class_student_id, session.id),
+    onSuccess: async (_, { student, session }) => {
+      await refreshClassWorkspace();
+      toast.success(`Set ${student.student_code} to 8.00 for ${session.name}.`);
+      setScoreEightTarget(null);
+    },
+    onError: (mutationError) => toast.error(mutationError.message),
+  });
+
   const orderedSessions = useMemo(
     () =>
       [...(data?.sessions ?? [])].sort(
@@ -239,11 +280,15 @@ export default function AdminGradingSessionsPage() {
     return visibleSessions;
   }, [orderedSessions, query]);
 
+  const gradeMatrixSessions = useMemo(
+    () => selectLatestMatrixLabSessions(orderedSessions),
+    [orderedSessions]
+  );
+
   const matrixView = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    const latestMatrixSessions = selectLatestMatrixLabSessions(orderedSessions);
     if (!normalized) {
-      return { students: data?.students ?? [], sessions: latestMatrixSessions };
+      return { students: data?.students ?? [], sessions: gradeMatrixSessions };
     }
 
     const matchingStudents = (data?.students ?? []).filter((student) =>
@@ -251,7 +296,7 @@ export default function AdminGradingSessionsPage() {
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalized))
     );
-    const matchingSessions = latestMatrixSessions.filter((session) =>
+    const matchingSessions = gradeMatrixSessions.filter((session) =>
       [session.name, session.lab_code, session.lab_title]
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalized))
@@ -266,10 +311,30 @@ export default function AdminGradingSessionsPage() {
       sessions: matchingSessions.length
         ? matchingSessions
         : matchingStudents.length
-          ? latestMatrixSessions
+          ? gradeMatrixSessions
           : [],
     };
-  }, [data?.students, orderedSessions, query]);
+  }, [data?.students, gradeMatrixSessions, query]);
+
+  const missingSubmissionCount = useMemo(() => {
+    const students = data?.students ?? [];
+    if (!students.length || !gradeMatrixSessions.length) return 0;
+
+    const submittedCells = new Set(
+      (data?.gradeMatrix ?? []).map(
+        (result) => `${result.class_student_id}:${result.grading_session_id}`
+      )
+    );
+
+    return students.reduce(
+      (count, student) =>
+        count +
+        gradeMatrixSessions.filter(
+          (session) => !submittedCells.has(`${student.class_student_id}:${session.id}`)
+        ).length,
+      0
+    );
+  }, [data?.gradeMatrix, data?.students, gradeMatrixSessions]);
 
   const totalPages = Math.ceil(sessions.length / pageSize) || 1;
   const activePage = Math.min(currentPage, totalPages);
@@ -305,7 +370,7 @@ export default function AdminGradingSessionsPage() {
         };
         for (const session of matrixView.sessions) {
           const result = resultByCell.get(`${student.class_student_id}:${session.id}`);
-          row[`${session.lab_code} - ${session.name}`] = result?.latest_score ?? "";
+          row[`${session.lab_code} - ${session.name}`] = displayScore(result?.latest_score);
         }
         return row;
       });
@@ -329,6 +394,121 @@ export default function AdminGradingSessionsPage() {
       toast.error(exportError instanceof Error ? exportError.message : "Unable to export grades.");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const exportMissingGradeMatrix = async () => {
+    const students = data?.students ?? [];
+    if (!students.length || !gradeMatrixSessions.length) return;
+
+    setIsExportingMissing(true);
+    try {
+      const XLSX = await import("xlsx");
+      const resultByCell = new Map(
+        (data?.gradeMatrix ?? []).map((result) => [
+          `${result.class_student_id}:${result.grading_session_id}`,
+          result,
+        ])
+      );
+
+      const overviewRows = students.map((student) => {
+        const missingSessions = gradeMatrixSessions.filter(
+          (session) => !resultByCell.has(`${student.class_student_id}:${session.id}`)
+        );
+        const row: Record<string, string | number> = {
+          "Student ID": student.student_code,
+          "Full name": student.student_name ?? "",
+          Email: student.student_email,
+          "Missing Count": missingSessions.length,
+          "Missing Labs": missingSessions
+            .map((session) => `${session.lab_code} - ${session.name}`)
+            .join(", "),
+        };
+
+        for (const session of gradeMatrixSessions) {
+          const result = resultByCell.get(`${student.class_student_id}:${session.id}`);
+          row[`${session.lab_code} - ${session.name}`] = result ? "Submitted" : "Missing";
+        }
+
+        return row;
+      });
+
+      const missingRows = students.flatMap((student) =>
+        gradeMatrixSessions
+          .filter((session) => !resultByCell.has(`${student.class_student_id}:${session.id}`))
+          .map((session) => ({
+            "Student ID": student.student_code,
+            "Full name": student.student_name ?? "",
+            Email: student.student_email,
+            Lab: session.lab_code,
+            Session: session.name,
+          }))
+      );
+
+      const workbook = XLSX.utils.book_new();
+      const overviewWorksheet = XLSX.utils.json_to_sheet(overviewRows);
+      overviewWorksheet["!cols"] = [
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 32 },
+        { wch: 14 },
+        { wch: 42 },
+        ...gradeMatrixSessions.map(() => ({ wch: 20 })),
+      ];
+      XLSX.utils.book_append_sheet(workbook, overviewWorksheet, "Missing Overview");
+
+      const detailWorksheet = XLSX.utils.json_to_sheet(missingRows);
+      detailWorksheet["!cols"] = [{ wch: 16 }, { wch: 28 }, { wch: 32 }, { wch: 12 }, { wch: 24 }];
+      XLSX.utils.book_append_sheet(workbook, detailWorksheet, "Missing Details");
+
+      XLSX.writeFile(
+        workbook,
+        excelSafeFilename(
+          `${data?.termName ?? "Term"}_${data?.className ?? "Class"}_missing_lab_overview.xlsx`
+        )
+      );
+      toast.success(`Exported ${missingRows.length} missing lab record(s).`);
+    } catch (exportError) {
+      toast.error(
+        exportError instanceof Error
+          ? exportError.message
+          : "Unable to export missing lab overview."
+      );
+    } finally {
+      setIsExportingMissing(false);
+    }
+  };
+
+  const openMatrixDetails = async ({ student, session, result }: MatrixDetailTarget) => {
+    setDetailStudent({
+      class_student_id: student.class_student_id,
+      student_code: student.student_code,
+      student_name: student.student_name,
+      student_email: student.student_email,
+      attempt_count: result.attempt_count,
+      latest_attempt_no: result.latest_attempt_no,
+      latest_score: result.latest_score,
+      latest_status: result.latest_status,
+    });
+    setDetailAttempts([]);
+    setLoadingDetailAttempts(true);
+
+    try {
+      const attempts = await queryClient.fetchQuery(
+        adminStudentDetailsQueryOptions(
+          params.termId,
+          params.classId,
+          session.id,
+          student.class_student_id,
+          result.attempt_count > 0
+        )
+      );
+      setDetailAttempts(attempts);
+    } catch (loadError) {
+      toast.error(loadError instanceof Error ? loadError.message : "Unable to load attempts");
+      setDetailAttempts([]);
+    } finally {
+      setLoadingDetailAttempts(false);
     }
   };
 
@@ -425,6 +605,24 @@ export default function AdminGradingSessionsPage() {
                     )}
                     {isExporting ? "Exporting…" : "Export Excel"}
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportMissingGradeMatrix}
+                    disabled={
+                      isPending ||
+                      isExportingMissing ||
+                      gradeMatrixSessions.length === 0 ||
+                      missingSubmissionCount === 0
+                    }
+                  >
+                    {isExportingMissing ? (
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileDown className="mr-2 h-4 w-4" />
+                    )}
+                    {isExportingMissing ? "Exporting…" : "Export Missing"}
+                  </Button>
                 </>
               ) : null}
               <div
@@ -500,6 +698,17 @@ export default function AdminGradingSessionsPage() {
                 sessions={matrixView.sessions}
                 students={matrixView.students}
                 results={data?.gradeMatrix ?? []}
+                onViewDetails={openMatrixDetails}
+                onSetScoreEight={setScoreEightTarget}
+                settingScoreEight={setScoreEightMutation.isPending}
+                settingScoreEightCell={
+                  setScoreEightMutation.variables
+                    ? {
+                        classStudentId: setScoreEightMutation.variables.student.class_student_id,
+                        sessionId: setScoreEightMutation.variables.session.id,
+                      }
+                    : null
+                }
                 emptyMessage={
                   query.trim()
                     ? "No students or grading sessions match this search."
@@ -619,6 +828,16 @@ export default function AdminGradingSessionsPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onImported={refreshClassWorkspace}
+      />
+
+      <SubmissionDetailDialog
+        student={detailStudent}
+        attempts={detailAttempts}
+        loading={loadingDetailAttempts}
+        onClose={() => {
+          setDetailStudent(null);
+          setDetailAttempts([]);
+        }}
       />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -903,6 +1122,45 @@ export default function AdminGradingSessionsPage() {
               disabled={deleteMutation.isPending}
             >
               {deleteMutation.isPending ? "Deleting…" : "Delete session"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(scoreEightTarget)}
+        onOpenChange={(open) => {
+          if (!open && !setScoreEightMutation.isPending) setScoreEightTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set score to 8?</DialogTitle>
+            <DialogDescription>
+              This will update the latest submission for{" "}
+              <strong className="text-foreground">{scoreEightTarget?.student.student_code}</strong>{" "}
+              in{" "}
+              <strong className="text-foreground">
+                {scoreEightTarget?.session.lab_code} - {scoreEightTarget?.session.name}
+              </strong>{" "}
+              to 8.00 and replace its result details with the set-8 template.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setScoreEightTarget(null)}
+              disabled={setScoreEightMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (scoreEightTarget) setScoreEightMutation.mutate(scoreEightTarget);
+              }}
+              disabled={setScoreEightMutation.isPending || !scoreEightTarget}
+            >
+              {setScoreEightMutation.isPending ? "Setting…" : "Set score 8"}
             </Button>
           </DialogFooter>
         </DialogContent>
