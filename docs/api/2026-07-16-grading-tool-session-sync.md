@@ -108,6 +108,23 @@ RPC tự động:
 
 Tool không được insert trực tiếp vào `session_submissions`.
 
+Sau khi sync xong một batch cho session, tool phải gọi RPC finalize/backfill:
+
+```http
+POST /rest/v1/rpc/backfill_missing_session_submissions_from_previous
+```
+
+```json
+{
+  "p_grading_session_id": "uuid"
+}
+```
+
+RPC này tạo submission cho các sinh viên thuộc lớp nhưng chưa có submission
+trong session mới, bằng cách copy latest score từ session mới nhất trước đó của
+cùng class + lab. Kết quả trả về là số submission đã backfill. RPC chỉ chạy khi
+session đích còn `open` và chưa qua deadline.
+
 ## 2. Cần sửa gì trong `grading-auto-server`
 
 ### 2.1 Payload public hiện tại có thể giữ nguyên
@@ -544,6 +561,34 @@ GET /rest/v1/session_submissions
 Nếu cùng một source URL có thể được chấm lại hợp lệ, dùng `grading_job_id` của
 tool làm idempotency key thay vì chỉ dựa vào URL.
 
+## 8.1 Backfill submission thiếu sau batch sync
+
+Sau khi tất cả kết quả hiện có của batch đã gọi `create_session_submission`
+thành công, gọi:
+
+```http
+POST /rest/v1/rpc/backfill_missing_session_submissions_from_previous
+```
+
+```json
+{
+  "p_grading_session_id": "55d21bd3-b1fc-4b85-9448-9715979658ee"
+}
+```
+
+Quy tắc:
+
+- chỉ backfill sinh viên đang thuộc class của session;
+- chỉ backfill sinh viên chưa có bất kỳ submission nào trong session đích;
+- lấy latest attempt từ session trước mới nhất của cùng class + lab;
+- submission được tạo với `attempt_no = 1`, `item_type = original`, giữ nguyên
+  score/status/details cũ và thêm metadata `copied_reason =
+  missing_submission_backfill`;
+- nếu student không có điểm ở đợt trước thì bỏ qua.
+
+Không gọi RPC này trước khi batch sync chính kết thúc, vì các kết quả thật của
+batch phải được ghi trước điểm copy từ đợt trước.
+
 ## 9. Ví dụ C# tối thiểu
 
 ```csharp
@@ -701,6 +746,8 @@ where gs.id = '{GRADING_SESSION_ID}'::uuid;
 - [ ] Không chọn session theo `created_at desc`.
 - [ ] Resolve `class_student_id` bằng `session.class_id + student_code`.
 - [ ] Chỉ gọi `create_session_submission`.
+- [ ] Sau batch sync, gọi `backfill_missing_session_submissions_from_previous`
+      cho session vừa sync.
 - [ ] Không insert trực tiếp vào `session_submissions`.
 - [ ] Không dùng RPC cũ `create_class_lab_submission`.
 - [ ] Chặn retry trùng bằng `grading_job_id`.

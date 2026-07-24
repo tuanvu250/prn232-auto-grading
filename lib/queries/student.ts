@@ -16,7 +16,7 @@ export function studentSessionOverviewQueryOptions() {
   return queryOptions({
     queryKey: studentQueryKeys.sessionOverview(),
     queryFn: getStudentSessionOverviewAction,
-    staleTime: 60_000,
+    staleTime: 15_000,
   });
 }
 
@@ -30,7 +30,7 @@ export function studentSessionQueryOptions(sessionId: string) {
       ]);
       return { attempts, sessionAccess };
     },
-    staleTime: 30_000,
+    staleTime: 10_000,
     enabled: Boolean(sessionId),
   });
 }

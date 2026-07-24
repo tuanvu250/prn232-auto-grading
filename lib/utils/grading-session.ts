@@ -2,9 +2,36 @@ const naturalTextCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
 });
+const matrixLabCodes = ["LAB1", "LAB2", "LAB3"] as const;
 
 export function compareNaturalText(left: string, right: string) {
   return naturalTextCollator.compare(left, right);
+}
+
+export function normalizeLabCode(value: string) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+export function selectLatestMatrixLabSessions<T extends { lab_code: string; created_at: string }>(
+  sessions: T[]
+) {
+  const latestByLab = new Map<string, T>();
+  for (const session of sessions) {
+    const labCode = normalizeLabCode(session.lab_code);
+    if (!matrixLabCodes.includes(labCode as (typeof matrixLabCodes)[number])) continue;
+
+    const current = latestByLab.get(labCode);
+    if (!current || session.created_at.localeCompare(current.created_at) > 0) {
+      latestByLab.set(labCode, session);
+    }
+  }
+
+  return matrixLabCodes
+    .map((labCode) => latestByLab.get(labCode))
+    .filter((session): session is T => Boolean(session));
 }
 
 export function normalizeOptionalUrl(value: string | null | undefined) {

@@ -31,7 +31,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TablePagination } from "@/components/admin/TablePagination";
 import { createClassAction, updateClassAction, deleteClassAction } from "@/lib/actions/erd-admin";
 import type { ClassRow } from "@/lib/types/erd";
-import { adminClassesQueryOptions, adminQueryKeys } from "@/lib/queries/admin";
+import { adminClassesQueryOptions } from "@/lib/queries/admin";
+import { invalidateAdminTermCaches } from "@/lib/queries/invalidation";
 
 export default function AdminClassesPage() {
   const params = useParams<{ termId: string }>();
@@ -82,7 +83,7 @@ export default function AdminClassesPage() {
       await updateClassAction(editClass.id, editName);
       toast.success("Class updated.");
       setEditDialogOpen(false);
-      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.classes(params.termId) });
+      await invalidateAdminTermCaches(queryClient, params.termId);
     } catch (err) {
       console.error("Failed to update class:", err);
       toast.error("Unable to update class.");
@@ -99,7 +100,7 @@ export default function AdminClassesPage() {
       toast.success("Class and all associated results deleted.");
       setDeleteDialogOpen(false);
       setCurrentPage(1);
-      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.classes(params.termId) });
+      await invalidateAdminTermCaches(queryClient, params.termId);
     } catch (err) {
       console.error("Failed to delete class:", err);
       toast.error("Unable to delete class.");
@@ -130,7 +131,7 @@ export default function AdminClassesPage() {
       setDialogOpen(false);
       setName("");
       setCurrentPage(1);
-      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.classes(params.termId) });
+      await invalidateAdminTermCaches(queryClient, params.termId);
     } catch (err) {
       console.error("Failed to create class:", err);
       toast.error("Unable to create class.");

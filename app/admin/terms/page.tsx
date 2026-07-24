@@ -30,7 +30,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TablePagination } from "@/components/admin/TablePagination";
 import { createTermAction, updateTermAction, deleteTermAction } from "@/lib/actions/erd-admin";
 import type { Term } from "@/lib/types/erd";
-import { adminQueryKeys, adminTermsQueryOptions } from "@/lib/queries/admin";
+import { adminTermsQueryOptions } from "@/lib/queries/admin";
+import { invalidateAdminRootCaches } from "@/lib/queries/invalidation";
 
 function formatDate(dateStr: string | null) {
   if (!dateStr) return "—";
@@ -102,7 +103,7 @@ export default function AdminTermsPage() {
       await updateTermAction(editTerm.id, editName, editStartsOn || null, editEndsOn || null);
       toast.success("Term updated.");
       setEditDialogOpen(false);
-      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.terms() });
+      await invalidateAdminRootCaches(queryClient);
     } catch (err) {
       console.error("Failed to update term:", err);
       toast.error("Unable to update term.");
@@ -118,7 +119,7 @@ export default function AdminTermsPage() {
       await deleteTermAction(deleteTermId);
       toast.success("Term and all associated classes deleted.");
       setDeleteDialogOpen(false);
-      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.all });
+      await invalidateAdminRootCaches(queryClient);
     } catch (err) {
       console.error("Failed to delete term:", err);
       toast.error("Unable to delete term.");
@@ -146,7 +147,7 @@ export default function AdminTermsPage() {
       setName("");
       setStartsOn("");
       setEndsOn("");
-      await queryClient.invalidateQueries({ queryKey: adminQueryKeys.terms() });
+      await invalidateAdminRootCaches(queryClient);
     } catch (err) {
       console.error("Failed to create term:", err);
       toast.error("Unable to create term.");

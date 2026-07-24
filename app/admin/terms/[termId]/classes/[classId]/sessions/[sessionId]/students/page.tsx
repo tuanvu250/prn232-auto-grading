@@ -54,11 +54,11 @@ import {
   updateStudentSubmissionAction,
 } from "@/lib/actions/erd-admin";
 import {
-  adminQueryKeys,
   adminSessionSubmissionsQueryOptions,
   adminSessionStudentsQueryOptions,
   adminStudentDetailsQueryOptions,
 } from "@/lib/queries/admin";
+import { invalidateAdminClassCaches } from "@/lib/queries/invalidation";
 import type {
   GradingSessionStudentResult,
   SessionSubmission,
@@ -184,16 +184,12 @@ export default function AdminSessionStudentsPage() {
   }, [data?.results, loadAttempts]);
 
   const refreshStudent = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: adminQueryKeys.sessionStudents(params.termId, params.classId, params.sessionId),
-    });
+    await invalidateAdminClassCaches(queryClient, params.termId, params.classId);
     if (selectedStudent) await loadAttempts(selectedStudent);
   };
 
   const refreshResults = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: adminQueryKeys.sessionStudents(params.termId, params.classId, params.sessionId),
-    });
+    await invalidateAdminClassCaches(queryClient, params.termId, params.classId);
     toast.success("Results refreshed.");
   };
 
