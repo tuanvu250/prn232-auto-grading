@@ -121,7 +121,51 @@ export interface CreateGradingSessionsInput {
   deadline: string | null;
 }
 
-export async function createGradingSessionsAction(input: CreateGradingSessionsInput) {
+export type CreateGradingSessionsResult =
+  | { success: true; created: number; sessions: Array<{ id: string; class_id: string }> }
+  | { success: false; message: string };
+
+function getCreateGradingSessionsErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Forbidden")) {
+    return "You need admin access to create grading sessions.";
+  }
+  if (message.includes("Term, lab, session name")) {
+    return "Select a lab, enter a session name, and choose at least one class.";
+  }
+  if (message.includes("Deadline")) {
+    return message;
+  }
+  if (message.includes("Drive root")) {
+    return message;
+  }
+  if (message.includes("Every selected class")) {
+    return message;
+  }
+  if (message.includes("An open session already exists")) {
+    return message;
+  }
+  if (message.includes("grading_sessions_one_open_per_class_lab_idx")) {
+    return "An open session already exists for this lab in at least one selected class. Close the current session before creating the next one.";
+  }
+
+  return "Unable to create grading sessions. Please try again or check the server logs.";
+}
+
+export async function createGradingSessionsAction(
+  input: CreateGradingSessionsInput
+): Promise<CreateGradingSessionsResult> {
+  try {
+    return await createGradingSessions(input);
+  } catch (error) {
+    console.error("createGradingSessionsAction failed", error);
+    return { success: false, message: getCreateGradingSessionsErrorMessage(error) };
+  }
+}
+
+async function createGradingSessions(
+  input: CreateGradingSessionsInput
+): Promise<CreateGradingSessionsResult> {
   await requireAdmin();
   const targetsByClass = new Map(
     input.targets.map((target) => [target.classId.trim(), target.driveRootUrl])
@@ -178,7 +222,7 @@ export async function createGradingSessionsAction(input: CreateGradingSessionsIn
     )
     .select("id, class_id");
   if (error) throw new Error(error.message);
-  return { created: data?.length ?? 0, sessions: data ?? [] };
+  return { success: true, created: data?.length ?? 0, sessions: data ?? [] };
 }
 
 export async function updateGradingSessionAction(

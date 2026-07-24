@@ -141,8 +141,8 @@ export default function AdminGradingSessionsPage() {
     });
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      createGradingSessionsAction({
+    mutationFn: async () => {
+      const result = await createGradingSessionsAction({
         termId: params.termId,
         targets: selectedClassIds.map((classId) => ({
           classId,
@@ -151,7 +151,10 @@ export default function AdminGradingSessionsPage() {
         labId: selectedLabId,
         name,
         deadline: deadline ? new Date(deadline).toISOString() : null,
-      }),
+      });
+      if (!result.success) throw new Error(result.message);
+      return result;
+    },
     onSuccess: async (result) => {
       await refresh();
       toast.success(`Created ${result.created} grading session${result.created === 1 ? "" : "s"}.`);
